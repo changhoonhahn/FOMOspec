@@ -2,6 +2,7 @@
 '''
 import numpy as np 
 from astropy import units as U
+from astropy.cosmology import Planck13 as cosmo
 # --- desi ---
 import desispec.io as desiIO
 # --- firefly ---
@@ -27,7 +28,7 @@ class GSfirefly(GalaxySpec):
         # wavelength of masking emission lines
         self.lambda_emission = [3728., 4861., 5007., 6564.]
 
-    def generic(wave, flux, fractional_error=0.1):  
+    def generic(self, wave, flux, fractional_error=0.1):  
         ''' Read in given restframe wavelength [Ang] and flux [1e-17 erg/s/A/cm^2] 
         to class compatible with gs.GalaxySpectrumFIREFLY object
         '''
@@ -43,9 +44,9 @@ class GSfirefly(GalaxySpec):
         self.error = self.flux * fractional_error
         self.bad_flags = np.ones(len(self.restframe_wavelength))
 		
-        vdisp = 70.
-        trust_flag = 1
-        objid = 0
+        self.vdisp = 70.
+        self.trust_flag = 1
+        self.objid = 0
 
         lines_mask = self.emissionlineMask(self.restframe_wavelength)
 
@@ -70,7 +71,7 @@ class GSfirefly(GalaxySpec):
     def emissionlineMask(self, restframe_wavelength): 
         ''' given restframe wavelength return mask where emission lines are 
         '''
-        lines_mask = np.ones(len(restframe_wavelength)).astype(bool)
+        lines_mask = np.zeros(len(restframe_wavelength)).astype(bool)
         for lam in self.lambda_emission: 
             lines_mask = lines_mask | ((restframe_wavelength > lam - self.N_angstrom_masked) & 
                     (restframe_wavelength < lam + self.N_angstrom_masked))
