@@ -7,6 +7,8 @@ from astropy.cosmology import Planck13 as cosmo
 import desispec.io as desiIO
 # --- firefly ---
 import GalaxySpectrumFIREFLY as gs
+import StellarPopulationModel as spm
+from firefly_library import airtovac, convert_chis_to_probs, light_weights_to_mass, calculate_averages_pdf, normalise_spec, match_data_models
 
 
 class GalaxySpec(object): 
