@@ -143,7 +143,7 @@ class Firefly(spm.StellarPopulationModel):
                 # Gets the mass loss factors.
                 imf_name = dict_imfs[imf].lower()
                 ML_metallicity, ML_age, ML_totM, ML_alive, ML_wd, ML_ns, ML_bh, ML_turnoff = np.loadtxt(
-                        os.path.join(os.environ['STELLARPOPMODELS_DIR'],'data','massloss_', imf_name, '.txt'), 
+                        os.path.join(os.environ['STELLARPOPMODELS_DIR'],'data','massloss_'+imf_name+'.txt'), 
                         unpack=True, skiprows=2)
 
                 # First build the grids of the quantities. Make sure they are in linear units.                  
@@ -173,14 +173,22 @@ class Firefly(spm.StellarPopulationModel):
                     final_ML_bh.append(mass_per_ssp[i_ssp] * new_ML_bh)
                     final_ML_turnoff.append(mass_per_ssp[i_ssp] * new_ML_turnoff)
                     final_gas_fraction.append(mass_per_ssp[i_ssp] - new_ML_totM)
+                
+        	final_ML_totM = np.array(final_ML_totM) 
+                final_ML_alive = np.array(final_ML_alive)
+                final_ML_wd = np.array(final_ML_wd)
+                final_ML_ns = np.array(final_ML_ns)  
+                final_ML_bh = np.array(final_ML_bh) 
+                final_ML_turnoff = np.array(final_ML_turnoff)
+                final_gas_fraction = np.array(final_gas_fraction)
 
                 # Calculate the total mass loss from all the SSP contributions.
-                combined_ML_totM        = np.sum(np.array(final_ML_totM))
-                combined_ML_alive       = np.sum(np.array(final_ML_alive))
-                combined_ML_wd          = np.sum(np.array(final_ML_wd))
-                combined_ML_ns          = np.sum(np.array(final_ML_ns))
-                combined_ML_bh          = np.sum(np.array(final_ML_bh))
-                combined_gas_fraction   = np.sum(mass_per_ssp - np.array(final_ML_totM))
+                combined_ML_totM        = np.sum(final_ML_totM)
+                combined_ML_alive       = np.sum(final_ML_alive)
+                combined_ML_wd          = np.sum(final_ML_wd)
+                combined_ML_ns          = np.sum(final_ML_ns)
+                combined_ML_bh          = np.sum(final_ML_bh)
+                combined_gas_fraction   = np.sum(mass_per_ssp - final_ML_totM)
 
                 # 8. output dictionary 
                 output = {} 
@@ -195,12 +203,14 @@ class Firefly(spm.StellarPopulationModel):
 
                 for prop in ['age', 'metallicity']: 
                     for lm in ['light', 'mass']: 
-                        output['properties'][prop+'_'+lm+'W'] = trylog10(averages[lm+'_'+prop])
+                        if prop == 'metallicity': propstr = 'metal'
+                        else: propstr = prop
+                        output['properties'][prop+'_'+lm+'W'] = trylog10(averages[lm+'_'+propstr])
                         for isig in [1, 2, 3]: 
                             output['properties'][prop+'_'+lm+'W_up_'+str(isig)+'sig'] = \
-                                    trylog10(averages[lm+'_'+prop+'_'+str(isig)+'_sig_plus'])
+                                    trylog10(averages[lm+'_'+propstr+'_'+str(isig)+'_sig_plus'])
                             output['properties'][prop+'_'+lm+'W_low_'+str(isig)+'sig'] = \
-                                    trylog10(averages[lm+'_'+prop+'_'+str(isig)+'_sig_minus'])
+                                    trylog10(averages[lm+'_'+propstr+'_'+str(isig)+'_sig_minus'])
 
                 output['properties']['total_mass'] = trylog10(averages['stellar_mass'])
                 output['properties']['stellar_mass'] = trylog10(combined_ML_alive+combined_ML_wd+combined_ML_ns+combined_ML_bh)
