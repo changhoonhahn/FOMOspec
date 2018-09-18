@@ -1,4 +1,6 @@
 import os
+import h5py
+import time
 import numpy as np 
 from astropy import units as U
 from astropy.cosmology import Planck13 as cosmo
@@ -31,7 +33,8 @@ class Firefly(spm.StellarPopulationModel):
         for mi, mod in enumerate(self.model_libs): # loop over the models
             for imf in self.imfs: # loop over the IMFs 
                 # A. gets the models
-	        # print "getting the models"
+	        print("getting the models")
+                t0 = time.time() 
                 model_wave_int, model_flux_int, age, metal = self.get_model(
                         mod, # model 
                         imf, # IMF 
@@ -40,19 +43,26 @@ class Firefly(spm.StellarPopulationModel):
                         self.specObs.restframe_wavelength, 
                         self.specObs.r_instrument, 
                         self.specObs.ebv_mw)
+                print("takes %f" % ((time.time()-t0)/60.))
                 # B. matches the model and data to the same resolution
-                # print "Matching models to data"
+                print("Matching models to data")
+                t0 = time.time() 
                 wave, data_flux, error_flux, model_flux_raw = match_data_models(
                         self.specObs.restframe_wavelength, 
                         self.specObs.flux, 
                         self.specObs.bad_flags, 
                         self.specObs.error, 
                         model_wave_int, model_flux_int, self.wave_limits[0], self.wave_limits[1], saveDowngradedModel=False)
+                print("takes %f" % ((time.time()-t0)/60.))
                 # C. normalises the models to the median value of the data
-                # print "Normalising the models"
+                print("Normalising the models")
+                t0 = time.time() 
                 model_flux, mass_factors = normalise_spec(data_flux, model_flux_raw)
+                print("takes %f" % ((time.time()-t0)/60.))
 
                 # 3. Corrects from dust attenuation
+                print("Correction from dust attentuation")
+                t0 = time.time() 
                 if self.hpf_mode=='on':
                     # 3.1. Determining attenuation curve through HPF fitting, apply 
                     # attenuation curve to models and renormalise spectra
@@ -84,7 +94,10 @@ class Firefly(spm.StellarPopulationModel):
                     best_ebv = 0.0
                     hpf_models,mass_factors = normalise_spec(hpf_data,hpf_models)
                     # 4. Fits the models to the data
-                    light_weights, chis, branch = fitter(wave, hpf_data,hpf_error, hpf_models, self)
+                    light_weights, chis, branch = fitter(wave, hpf_data, hpf_error, hpf_models, self)
+                else: 
+                    raise ValueError("hpf_mode has to be 'on' or 'hpf_only'")
+                print("takes %f" % ((time.time()-t0)/60.))
 
                 # 5. Get mass-weighted SSP contributions using saved M/L ratio.
                 unnorm_mass, mass_weights = light_weights_to_mass(light_weights, mass_factors)
@@ -92,8 +105,9 @@ class Firefly(spm.StellarPopulationModel):
                 if np.all(np.isnan(mass_weights)):
                     raise ValueError # tbhdu = self.create_dummy_hdu()
 
-                # print "Calculating average properties and outputting"
                 # 6. Convert chis into probabilities and calculates all average properties and errors
+                print("Calculating average properties and outputting")
+                t0 = time.time() 
                 self.dof = len(wave)
                 probs = convert_chis_to_probs(chis, self.dof)
                 dist_lum = self.cosmo.luminosity_distance(self.specObs.redshift).to(U.cm).value
@@ -106,6 +120,7 @@ class Firefly(spm.StellarPopulationModel):
                 marginalised_age_weights_int    = np.sum(mass_weights.T,1)
                 for ua in range(len(unique_ages)):
                     marginalised_age_weights[ua] = np.sum(marginalised_age_weights_int[np.where(age==unique_ages[ua])])
+                print("takes %f" % ((time.time()-t0)/60.))
 
                 best_fit_index = [np.argmin(chis)]
                 best_fit = np.dot(light_weights[best_fit_index],model_flux)[0]
@@ -250,4 +265,15 @@ class Firefly(spm.StellarPopulationModel):
             output['properties']['ageMax'] = self.age_limits[1]
             output['properties']['Zmin'] = self.Z_limits[0]
             output['properties']['Zmax'] = self.Z_limits[1]
+
+            if self.write_results: # write to hdf5 file 
+                f = h5py.File(self.outputFile, 'w') 
+                for k in output.keys(): 
+                    if k == 'properties': 
+                        grp = f.create_group('properties')
+                        for kk in output['properties'].keys(): 
+                            grp.create_dataset(kk, data=output['properties'][kk])
+                    else: 
+                        f.create_dataset(k, data=output[k]) 
+                f.close() 
             return output 
