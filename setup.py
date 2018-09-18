@@ -14,7 +14,7 @@ setup(name = 'FOMOspec',
       platforms=['*nix'],
       license='GPL',
       requires = ['numpy', 'matplotlib', 'scipy'],
-      provides = ['FOMOspec'],
-      packages = ['FOMOspec'],
+      provides = ['fomospec'],
+      packages = ['fomospec'],
       scripts=['fomospec/util.py']
       )
