@@ -68,21 +68,31 @@ class Firefly(spm.StellarPopulationModel):
                 # 3. Corrects from dust attenuation
                 print("Correction from dust attentuation")
                 t0 = time.time() 
-                if self.hpf_mode=='on':
+                if self.hpf_mode == 'on':
                     # 3.1. Determining attenuation curve through HPF fitting, apply 
                     # attenuation curve to models and renormalise spectra
                     print("determining attentuation")
                     t00 = time.time() 
-                    best_ebv, attenuation_curve = determine_attenuation(wave, data_flux, error_flux, model_flux, self, age, metal)
+                    best_ebv, attenuation_curve = determine_attenuation(
+                            wave, 
+                            data_flux, 
+                            error_flux, 
+                            model_flux, 
+                            self, 
+                            age, 
+                            metal)
                     print("takes %f" % ((time.time()-t00)/60.))
 
-                    model_flux_atten = np.zeros(np.shape(model_flux_raw))
-                    for m in range(len(model_flux_raw)):
-                        model_flux_atten[m] = attenuation_curve * model_flux_raw[m] 
-                        
-                        model_flux, mass_factors = normalise_spec(data_flux, model_flux_atten)
-                        # 4. Fits the models to the data
-                        light_weights, chis, branch = self.Fitter(wave, data_flux, error_flux, model_flux)
+                    #model_flux_atten = np.zeros(np.shape(model_flux_raw))
+                    #for m in range(len(model_flux_raw)):
+                    #    model_flux_atten[m] = attenuation_curve * model_flux_raw[m] 
+                    model_flux_atten = attenuation_curve * model_flux_raw
+                    model_flux, mass_factors = normalise_spec(data_flux, model_flux_atten)
+                    # 4. Fits the models to the data
+                    print("fitter")
+                    t00 = time.time() 
+                    light_weights, chis, branch = self.Fitter(wave, data_flux, error_flux, model_flux)
+                    print("takes %f" % ((time.time() - t00)/60.))
 
                 elif self.hpf_mode == 'hpf_only':
                     # 3.2. Uses filtered values to determing SP properties only."
@@ -103,16 +113,17 @@ class Firefly(spm.StellarPopulationModel):
                     best_ebv = 0.0
                     hpf_models, mass_factors = normalise_spec(hpf_data, hpf_models)
                     # 4. Fits the models to the data
-                    print("older fitter")
-                    t00 = time.time() 
-                    _light_weights, _chis, _branch = fitter(wave, hpf_data,hpf_error, hpf_models, self)
-                    print("takes %f" % ((time.time()-t00)/60.))
-                    print("new fitter")
+                    print("fitter")
                     t00 = time.time() 
                     light_weights, chis, branch = self.Fitter(wave, hpf_data, hpf_error, hpf_models)
-                    print("takes %f" % ((time.time()-t00)/60.))
-                    assert np.array_equal(_light_weights, light_weights) 
-                    assert np.array_equal(_chis, chis) 
+                    print("takes %f" % ((time.time() - t00)/60.))
+                    #print("older fitter")
+                    #t00 = time.time() 
+                    #_light_weights, _chis, _branch = fitter(wave, hpf_data,hpf_error, hpf_models, self)
+                    #print("takes %f" % ((time.time()-t00)/60.))
+                    #assert np.array_equal(_light_weights, light_weights) 
+                    #assert np.array_equal(_branch, branch) 
+                    #assert np.array_equal(_chis, chis) 
                 else: 
                     raise ValueError("hpf_mode has to be 'on' or 'hpf_only'")
                 print("takes %f" % ((time.time()-t0)/60.))
