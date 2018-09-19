@@ -69,7 +69,7 @@ def firefly_LGAL_desiSpec(galid, model='m11', model_lib='MILES', imf='cha', hpf_
     spec_desi = desiIO.read_spectra(f_outspec)
     
     gspec = Spec.GSfirefly()
-    gspec.DESIlike(spec_desi)
+    gspec.DESIlike(spec_desi, redshift=redshift)
     gspec.path_to_spectrum = UT.dat_dir()
 
     # output firefly file 
