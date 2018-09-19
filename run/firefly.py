@@ -1,5 +1,6 @@
 #!/bin/usr/python
 import sys 
+import time 
 import numpy as np 
 from astropy.io import fits
 import astropy.cosmology as co
@@ -11,7 +12,19 @@ from fomospec import spectra as Spec
 from fomospec import fitters as Fitters
 
 
-def firefly_LGAL_sourceSpec(galid, model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
+def firefly_LGAL_sourceSpec(model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
+    ''' run firefly on all LGal DESI-like spectra
+    '''
+    # read in galids 
+    f_ids = ''.join([UT.dat_dir(), 'Lgal/galid_BGS_BC03_templates.txt']) 
+    galids = np.loadtxt(f_ids, unpack=True, dtype='int')
+
+    for id in galids: 
+        firefly_LGAL_sourceSpec_i(id, model=model, model_lib=model_lib, imf=imf, hpf_mode=hpf_mode)
+    return None
+
+
+def firefly_LGAL_sourceSpec_i(galid, model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
     ''' run firefly on L-Gal source spectra 
     '''
     # read in source spectra
@@ -55,9 +68,22 @@ def firefly_LGAL_sourceSpec(galid, model='m11', model_lib='MILES', imf='cha', hp
     return None 
 
 
-def firefly_LGAL_desiSpec(galid, model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
+def firefly_LGAL_desiSpec(model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
+    ''' run firefly on all LGal DESI-like spectra
+    '''
+    # read in galids 
+    f_ids = ''.join([UT.dat_dir(), 'Lgal/galid_BGS_BC03_templates.txt']) 
+    galids = np.loadtxt(f_ids, unpack=True, dtype='int')
+
+    for id in galids: 
+        firefly_LGAL_desiSpec_i(id, model=model, model_lib=model_lib, imf=imf, hpf_mode=hpf_mode)
+    return None
+
+
+def firefly_LGAL_desiSpec_i(galid, model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
     ''' run firelfy on L-Gal DESI-like spectra
     '''
+    t0 = time.time() 
     # read in source spectra (only to get the redshift) 
     f_name = 'gal_spectrum_'+str(galid)+'_BGS_template_BC03_Stelib.fits'
     f_inspec = fits.open(''.join([UT.dat_dir(), 'Lgal/templates/', f_name]))
@@ -93,14 +119,14 @@ def firefly_LGAL_desiSpec(galid, model='m11', model_lib='MILES', imf='cha', hpf_
             use_downgraded_models = False, 
             write_results = True)
     bestfit = firefly.fit_models_to_data()
+    print('galid %i took %f' % (galid, (time.time()-t0)/60.))
     return None 
 
 
 if __name__=='__main__':
-    galid = int(sys.argv[1])
-    type = sys.argv[2]
-    dust = sys.argv[3]
+    type = sys.argv[1]
+    dust = sys.argv[2]
     if type == 'source': 
-        firefly_LGAL_sourceSpec(galid, hpf_mode=dust) 
+        firefly_LGAL_sourceSpec(hpf_mode=dust) 
     elif type == 'desi': 
-        firefly_LGAL_desiSpec(galid, hpf_mode=dust)
+        firefly_LGAL_desiSpec(hpf_mode=dust)
