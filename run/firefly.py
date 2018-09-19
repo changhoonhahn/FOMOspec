@@ -74,7 +74,7 @@ def firefly_LGAL_desiSpec(galid, model='m11', model_lib='MILES', imf='cha', hpf_
 
     # output firefly file 
     f_out = ''.join(['firefly.', model, '.', model_lib, '.imf_', imf, '.dust_', hpf_mode, '.', 
-        'desi_out_', f_name.split('.fits')[0]], '.hdf5') 
+        'desi_out_', f_name.split('.fits')[0], '.hdf5']) 
     f_firefly = ''.join([UT.dat_dir(), 'Lgal/spectra/', f_out])
 
     firefly = Fitters.Firefly(gspec,

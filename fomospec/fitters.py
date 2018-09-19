@@ -2,6 +2,7 @@ import os
 import h5py
 import time
 import numpy as np 
+from scipy.stats import sigmaclip
 from astropy import units as U
 from astropy.cosmology import Planck13 as cosmo
 
@@ -13,7 +14,7 @@ from StellarPopulationModel import trylog10
 from firefly_library import airtovac, convert_chis_to_probs, light_weights_to_mass, calculate_averages_pdf, normalise_spec, match_data_models
 from firefly_dust import hpf, unred, determine_attenuation
 from firefly_instrument import downgrade
-from firefly_fitter import fitter
+from firefly_fitter import fitter, newFitter
 
 
 dict_imfs = {'cha': 'Chabrier', 'ss': 'Salpeter', 'kr': 'Kroupa'}
@@ -45,17 +46,21 @@ class Firefly(spm.StellarPopulationModel):
                         self.specObs.ebv_mw)
                 print("takes %f" % ((time.time()-t0)/60.))
                 # B. matches the model and data to the same resolution
-                print("Matching models to data")
+                print("Matching model and data resolutions ")
                 t0 = time.time() 
                 wave, data_flux, error_flux, model_flux_raw = match_data_models(
                         self.specObs.restframe_wavelength, 
                         self.specObs.flux, 
                         self.specObs.bad_flags, 
                         self.specObs.error, 
-                        model_wave_int, model_flux_int, self.wave_limits[0], self.wave_limits[1], saveDowngradedModel=False)
+                        model_wave_int, 
+                        model_flux_int, 
+                        self.wave_limits[0], 
+                        self.wave_limits[1], 
+                        saveDowngradedModel=False)
                 print("takes %f" % ((time.time()-t0)/60.))
                 # C. normalises the models to the median value of the data
-                print("Normalising the models")
+                print("Normalising the amplitude of the models")
                 t0 = time.time() 
                 model_flux, mass_factors = normalise_spec(data_flux, model_flux_raw)
                 print("takes %f" % ((time.time()-t0)/60.))
@@ -66,14 +71,18 @@ class Firefly(spm.StellarPopulationModel):
                 if self.hpf_mode=='on':
                     # 3.1. Determining attenuation curve through HPF fitting, apply 
                     # attenuation curve to models and renormalise spectra
+                    print("determining attentuation")
+                    t00 = time.time() 
                     best_ebv, attenuation_curve = determine_attenuation(wave, data_flux, error_flux, model_flux, self, age, metal)
+                    print("takes %f" % ((time.time()-t00)/60.))
+
                     model_flux_atten = np.zeros(np.shape(model_flux_raw))
                     for m in range(len(model_flux_raw)):
                         model_flux_atten[m] = attenuation_curve * model_flux_raw[m] 
                         
                         model_flux, mass_factors = normalise_spec(data_flux, model_flux_atten)
                         # 4. Fits the models to the data
-                        light_weights, chis, branch = fitter(wave, data_flux, error_flux, model_flux, self)
+                        light_weights, chis, branch = self.Fitter(wave, data_flux, error_flux, model_flux)
 
                 elif self.hpf_mode == 'hpf_only':
                     # 3.2. Uses filtered values to determing SP properties only."
@@ -92,9 +101,18 @@ class Firefly(spm.StellarPopulationModel):
                     hpf_error[zero_dat] = np.max(hpf_error)*999999.9
 
                     best_ebv = 0.0
-                    hpf_models,mass_factors = normalise_spec(hpf_data,hpf_models)
+                    hpf_models, mass_factors = normalise_spec(hpf_data, hpf_models)
                     # 4. Fits the models to the data
-                    light_weights, chis, branch = fitter(wave, hpf_data, hpf_error, hpf_models, self)
+                    print("older fitter")
+                    t00 = time.time() 
+                    _light_weights, _chis, _branch = fitter(wave, hpf_data,hpf_error, hpf_models, self)
+                    print("takes %f" % ((time.time()-t00)/60.))
+                    print("new fitter")
+                    t00 = time.time() 
+                    light_weights, chis, branch = self.Fitter(wave, hpf_data, hpf_error, hpf_models)
+                    print("takes %f" % ((time.time()-t00)/60.))
+                    assert np.array_equal(_light_weights, light_weights) 
+                    assert np.array_equal(_chis, chis) 
                 else: 
                     raise ValueError("hpf_mode has to be 'on' or 'hpf_only'")
                 print("takes %f" % ((time.time()-t0)/60.))
@@ -277,3 +295,9 @@ class Firefly(spm.StellarPopulationModel):
                         f.create_dataset(k, data=output[k]) 
                 f.close() 
             return output 
+
+    def Fitter(self, wavelength, data, error, models): 
+        ''' wrapper for newFitter
+        '''
+        nfitter = newFitter(wavelength, data, error, models, upper_limit_fit=self.max_iterations, fit_cap=self.fit_per_iteration_cap) 
+        return nfitter.output() 
