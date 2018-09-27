@@ -1,8 +1,8 @@
 import os
 import h5py
 import time
+import warnings 
 import numpy as np 
-from scipy.stats import sigmaclip
 from astropy import units as U
 from astropy.cosmology import Planck13 as cosmo
 
@@ -10,9 +10,7 @@ from estimations_3d import estimation
 
 # --- prospector --- 
 import prospect as Prospect
-from prospect.sources import CSPSpecBasis
 # --- firefly ---
-import GalaxySpectrumFIREFLY as gs
 import StellarPopulationModel as spm
 from StellarPopulationModel import trylog10
 from firefly_library import airtovac, convert_chis_to_probs, light_weights_to_mass, calculate_averages_pdf, normalise_spec, match_data_models
@@ -41,8 +39,8 @@ class Prospector(object):
         model_params["tau"]["prior"] = priors.LogUniform(mini=1e-1, maxi=1e1)
         model_params["mass"]["prior"] = priors.LogUniform(mini=1e9, maxi=1e11)
         model_params["tage"]["prior"] = priors.TopHat(mini=1, maxi=13.6)
-        model_params["zred"]["prior"] = priors.TopHat(mini=0., maxi=10.)
-        model_params["zred"]["isfree"] = True
+        #model_params["zred"]["prior"] = priors.TopHat(mini=0., maxi=10.)
+        #model_params["zred"]["isfree"] = True
         
         # Add burst parameters (fixed to zero be default)
         model_params.update(TemplateLibrary["burst_sfh"])
@@ -57,17 +55,15 @@ class Prospector(object):
         self.sps = None 
         self.sedmodel = None 
 
-    def model(self, lam, zred, theta, filters=None): 
+    def model(self, lam, theta, zred, filters=None): 
+        ''' wrapper for fsps based models. Given observed(?) wavelengths, 
+        theta, and redshift return spectra, photometry, and mfrac. 
         '''
-        '''
-        if self.sps is None: 
-            self.sps = self._load_sps(zcontinuous=self.zcontinuous) 
-        if self.sedmodel is None:
-            from prospect.models import SedModel
-            # Now instantiate the model using this new dictionary of parameter specifications
-            self.sedmodel = SedModel(self.model_params)
+        if self.sps is None: self._loadSPS()
+        if self.sedmodel is None: self._loadSEDmodel(zred=zred)
+        if self.model_params['zred']['init'] != zred: 
+            warnings.warn("there's a redshift mismatch between the stored model.") 
         
-        # load in 
         obs = {}
         if filters is not None: 
             from sedpy.observate import load_filters
@@ -79,36 +75,43 @@ class Prospector(object):
         # for spectrophotometry add in sedmodel.spe_calibration parameters
         # see https://github.com/bd-j/prospector/blob/master/prospect/models/sedmodel.py
         
-        tt = np.zeros(len(self.sedmodel.free_params))
-        tt[self.sedmodel.theta_index['zred']] = zred 
-        for n in ['logzsol', 'dust2', 'tau', 'tage', 'mass']: 
-            tt[self.sedmodel.theta_index[n]] = theta[n] 
-
-        flux, phot, mfrac = self.sedmodel.mean_model(tt, obs=obs, sps=self.sps) 
+        flux, phot, mfrac = self.sedmodel.mean_model(theta, obs=obs, sps=self.sps) 
         return flux, phot, mfrac
 
-    def _load_sps(self, zcontinuous=1, **extras): 
-        '''Instantiate and return the Stellar Population Synthesis object.
+    def dynesty_spec(self, lam, flux, flux_noise, zred, nested=True, write=True, output_file=None, silent=False): 
+        '''
+        '''
+        if write and output_file is None: raise ValueError 
 
-        :param zcontinuous: (default: 1)
-        python-fsps parameter controlling how metallicity interpolation of the
-        SSPs is acheived.  A value of `1` is recommended.
-        * 0: use discrete indices (controlled by parameter "zmet")
-        * 1: linearly interpolate in log Z/Z_\sun to the target
-             metallicity (the parameter "logzsol".)
-        * 2: convolve with a metallicity distribution function at each age.
-             The MDF is controlled by the parameter "pmetals"
-        '''
-        sps = CSPSpecBasis(zcontinuous=zcontinuous)
-        return sps
-    
-    def dynesty(self): 
-        '''
-        '''
         from prospect import fitting
         from prospect.likelihood import lnlike_spec
         import dynesty 
         from dynesty.dynamicsampler import stopping_function, weight_function
+        if self.sps is None: self._loadSPS()
+        if self.sedmodel is None: self._loadSEDmodel(zred=zred)
+        # observations 
+        obs = {} 
+        obs['wavelength'] = lam 
+        obs['spectrum'] = flux 
+        if flux_noise is not None: obs['unc'] = flux_noise 
+
+        def lnPost(tt, nested=nested): 
+            # Calculate prior probability and return -inf if not within prior
+            # Also if doing nested sampling, do not include the basic priors,
+            # since the drawing method already includes the prior probability
+            lnp_prior = self.sedmodel.prior_product(tt, nested=nested)
+            if not np.isfinite(lnp_prior):
+                return -np.infty
+
+            # model(theta) 
+            spec, _, _ = self.model(obs['wavelength'], tt, zred, filters=None)
+
+            # Calculate likelihoods
+            spec_noise = None 
+            if flux_noise is not None: spec_noise = True
+            lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=spec_noise)
+            return lnp_prior + lnp_spec
+        
         # dynesty Fitter parameters
         dyn_params = {'nested_bound': 'multi', # bounding method
                       'nested_sample': 'unif', # sampling method
@@ -119,29 +122,44 @@ class Prospector(object):
                       'nested_weight_kwargs': {"pfrac": 1.0},
                       'nested_stop_kwargs': {"post_thresh": 0.1}
                       }
-
-        def lnLike(lam, flux, zred)
-
-            # Calculate prior probability and return -inf if not within prior
-            # Also if doing nested sampling, do not include the basic priors,
-            # since the drawing method already includes the prior probability
-            lnp_prior = model.prior_product(theta, nested=nested)
-            if not np.isfinite(lnp_prior):
-                return -np.infty
-
-            # Generate "mean" model
-            spec, phot, mfrac = model.mean_model(theta, obs, sps=sps)
-
-            # Calculate likelihoods
-            lnp_spec = lnlike_spec(spec, obs=obs)
-            return lnp_prior + lnp_spec
-
-        out = fitting.run_dynesty_sampler(lnprobfn, prior_transform, model.ndim,
-                                  stop_function=stopping_function,
-                                  wt_function=weight_function,
-                                  **run_params)
-        return None 
+        run_params = self.model_params.copy() 
+        run_params.update(dyn_params)
     
+        tstart = time.time()  # time it
+        out = fitting.run_dynesty_sampler(
+                lnPost, 
+                self.sedmodel.prior_transform, 
+                self.sedmodel.ndim, 
+                stop_function=stopping_function, 
+                wt_function=weight_function,
+                **run_params)
+        duration = time.time() - tstart
+        if not silent: print("dynesty sampler took %f sec" % duration) 
+
+        if not write: 
+            return out  
+        else: 
+            from prospect.io import write_results
+            if not silent: print("Writing to %s" % output_file)
+            self.model_params["outfile"] = output_file 
+
+            write_results.write_hdf5(output_file, run_params, self.sedmodel, 
+                    obs, out, None, tsample=duration)
+            return None
+
+    def _loadSPS(self):  
+        from prospect.sources import CSPSpecBasis
+        self.sps = CSPSpecBasis(zcontinuous=self.zcontinuous)
+
+    def _loadSEDmodel(self, zred=None): 
+        # instantiate the model using self.model_params parameter specifications
+        from prospect.models import SedModel
+        if zred is not None: 
+            self.model_params["zred"]["isfree"] = False 
+            self.model_params["zred"]["init"] = zred
+        self.sedmodel = SedModel(self.model_params)
+        return None 
+
 
 
 class Firefly(spm.StellarPopulationModel): 
