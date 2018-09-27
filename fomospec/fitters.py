@@ -7,6 +7,10 @@ from astropy import units as U
 from astropy.cosmology import Planck13 as cosmo
 
 from estimations_3d import estimation
+
+# --- prospector --- 
+import prospect as Prospect
+from prospect.sources import CSPSpecBasis
 # --- firefly ---
 import GalaxySpectrumFIREFLY as gs
 import StellarPopulationModel as spm
@@ -18,6 +22,87 @@ from firefly_fitter import fitter, newFitter
 
 
 dict_imfs = {'cha': 'Chabrier', 'ss': 'Salpeter', 'kr': 'Kroupa'}
+
+class Prospector(object): 
+    ''' class object for spectral fitting using prospector
+    '''
+    def __init__(self, zcontinuous=1, add_neb=True): 
+        from prospect.models import priors
+        from prospect.models.templates import TemplateLibrary
+
+        self.zcontinuous = zcontinuous
+
+        self.TemplateLibrary = TemplateLibrary
+        
+        model_params = self.TemplateLibrary["parametric_sfh"]
+            
+        # Adjust priors for free parameters
+        model_params["logzsol"]["prior"] = priors.TopHat(mini=-1.0, maxi=0.1)
+        model_params["tau"]["prior"] = priors.LogUniform(mini=1e-1, maxi=1e1)
+        model_params["mass"]["prior"] = priors.LogUniform(mini=1e9, maxi=1e11)
+        model_params["tage"]["prior"] = priors.TopHat(mini=1, maxi=13.6)
+        model_params["zred"]["prior"] = priors.TopHat(mini=0., maxi=10.)
+        
+        # Add burst parameters (fixed to zero be default)
+        model_params.update(TemplateLibrary["burst_sfh"])
+        # Add dust emission parameters (fixed)
+        model_params.update(TemplateLibrary["dust_emission"])
+     
+        # Add nebular emission parameters and turn nebular emission on
+        if add_neb:
+            model_params.update(TemplateLibrary["nebular"])
+        
+        self.model_params = model_params
+        self.sps = None 
+        self.sedmodel = None 
+
+    def model(self, lam, zred, theta, filters=None): 
+
+        if self.sps is None: 
+            self._load_sps(zcontinuous=self.zcontinuous) 
+        if self.sedmodel is None:
+            self.sedmodel = self._getmodel()
+        
+        # load in 
+        obs = {}
+        if filters is not None: 
+            from sedpy.observate import load_filters
+            obs['filters'] = load_filters(filters)
+            mock["phot_wave"] = [f.wave_effective for f in mock["filters"]]
+        else: 
+            obs['filters'] = None 
+        obs['wavelength'] = lam 
+        # for spectrophotometry add in sedmodel.spe_calibration parameters
+        # see https://github.com/bd-j/prospector/blob/master/prospect/models/sedmodel.py
+
+        tt = theta.copy() 
+        tt[self.sedmodel.theta_index['zred']] = zred 
+
+        flux, phot, mfrac = self.sedmodel.mean_model(tt, obs=obs, sps=self.sps) 
+        return flux, phot, mfrac
+
+    def _getmodel(self): 
+        from prospect.models import SedModel
+        # set the value to the object_redshift keyword
+        self.model_params["zred"]['init'] = zred
+        # Now instantiate the model using this new dictionary of parameter specifications
+        sedmodel = SedModel(self.model_params)
+        return sedmodel
+
+    def _load_sps(self, zcontinuous=1, **extras): 
+        '''Instantiate and return the Stellar Population Synthesis object.
+
+        :param zcontinuous: (default: 1)
+        python-fsps parameter controlling how metallicity interpolation of the
+        SSPs is acheived.  A value of `1` is recommended.
+        * 0: use discrete indices (controlled by parameter "zmet")
+        * 1: linearly interpolate in log Z/Z_\sun to the target
+             metallicity (the parameter "logzsol".)
+        * 2: convolve with a metallicity distribution function at each age.
+             The MDF is controlled by the parameter "pmetals"
+        '''
+        sps = CSPSpecBasis(zcontinuous=zcontinuous)
+        return sps
 
 
 class Firefly(spm.StellarPopulationModel): 
