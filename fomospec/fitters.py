@@ -42,6 +42,7 @@ class Prospector(object):
         model_params["mass"]["prior"] = priors.LogUniform(mini=1e9, maxi=1e11)
         model_params["tage"]["prior"] = priors.TopHat(mini=1, maxi=13.6)
         model_params["zred"]["prior"] = priors.TopHat(mini=0., maxi=10.)
+        model_params["zred"]["isfree"] = True
         
         # Add burst parameters (fixed to zero be default)
         model_params.update(TemplateLibrary["burst_sfh"])
@@ -57,11 +58,14 @@ class Prospector(object):
         self.sedmodel = None 
 
     def model(self, lam, zred, theta, filters=None): 
-
+        '''
+        '''
         if self.sps is None: 
-            self._load_sps(zcontinuous=self.zcontinuous) 
+            self.sps = self._load_sps(zcontinuous=self.zcontinuous) 
         if self.sedmodel is None:
-            self.sedmodel = self._getmodel()
+            from prospect.models import SedModel
+            # Now instantiate the model using this new dictionary of parameter specifications
+            self.sedmodel = SedModel(self.model_params)
         
         # load in 
         obs = {}
@@ -74,20 +78,14 @@ class Prospector(object):
         obs['wavelength'] = lam 
         # for spectrophotometry add in sedmodel.spe_calibration parameters
         # see https://github.com/bd-j/prospector/blob/master/prospect/models/sedmodel.py
-
-        tt = theta.copy() 
+        
+        tt = np.zeros(len(self.sedmodel.free_params))
         tt[self.sedmodel.theta_index['zred']] = zred 
+        for n in ['logzsol', 'dust2', 'tau', 'tage', 'mass']: 
+            tt[self.sedmodel.theta_index[n]] = theta[n] 
 
         flux, phot, mfrac = self.sedmodel.mean_model(tt, obs=obs, sps=self.sps) 
         return flux, phot, mfrac
-
-    def _getmodel(self): 
-        from prospect.models import SedModel
-        # set the value to the object_redshift keyword
-        self.model_params["zred"]['init'] = zred
-        # Now instantiate the model using this new dictionary of parameter specifications
-        sedmodel = SedModel(self.model_params)
-        return sedmodel
 
     def _load_sps(self, zcontinuous=1, **extras): 
         '''Instantiate and return the Stellar Population Synthesis object.
@@ -103,6 +101,47 @@ class Prospector(object):
         '''
         sps = CSPSpecBasis(zcontinuous=zcontinuous)
         return sps
+    
+    def dynesty(self): 
+        '''
+        '''
+        from prospect import fitting
+        from prospect.likelihood import lnlike_spec
+        import dynesty 
+        from dynesty.dynamicsampler import stopping_function, weight_function
+        # dynesty Fitter parameters
+        dyn_params = {'nested_bound': 'multi', # bounding method
+                      'nested_sample': 'unif', # sampling method
+                      'nested_nlive_init': 100,
+                      'nested_nlive_batch': 100,
+                      'nested_bootstrap': 0,
+                      'nested_dlogz_init': 0.05,
+                      'nested_weight_kwargs': {"pfrac": 1.0},
+                      'nested_stop_kwargs': {"post_thresh": 0.1}
+                      }
+
+        def lnLike(lam, flux, zred)
+
+            # Calculate prior probability and return -inf if not within prior
+            # Also if doing nested sampling, do not include the basic priors,
+            # since the drawing method already includes the prior probability
+            lnp_prior = model.prior_product(theta, nested=nested)
+            if not np.isfinite(lnp_prior):
+                return -np.infty
+
+            # Generate "mean" model
+            spec, phot, mfrac = model.mean_model(theta, obs, sps=sps)
+
+            # Calculate likelihoods
+            lnp_spec = lnlike_spec(spec, obs=obs)
+            return lnp_prior + lnp_spec
+
+        out = fitting.run_dynesty_sampler(lnprobfn, prior_transform, model.ndim,
+                                  stop_function=stopping_function,
+                                  wt_function=weight_function,
+                                  **run_params)
+        return None 
+    
 
 
 class Firefly(spm.StellarPopulationModel): 
