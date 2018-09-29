@@ -93,7 +93,10 @@ class Prospector(object):
         obs = {} 
         obs['wavelength'] = lam 
         obs['spectrum'] = flux 
-        if flux_noise is not None: obs['unc'] = flux_noise 
+        if flux_noise is not None: 
+            obs['unc'] = flux_noise 
+        else: 
+            obs['unc'] = np.ones(len(lam))
 
         def lnPost(tt, nested=nested): 
             # Calculate prior probability and return -inf if not within prior
@@ -107,9 +110,7 @@ class Prospector(object):
             spec, _, _ = self.model(obs['wavelength'], tt, zred, filters=None)
 
             # Calculate likelihoods
-            spec_noise = None 
-            if flux_noise is not None: spec_noise = True
-            lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=spec_noise)
+            lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=None)
             return lnp_prior + lnp_spec
         
         # dynesty Fitter parameters
@@ -147,9 +148,24 @@ class Prospector(object):
                     obs, out, None, tsample=duration)
             return None
 
+    def read_dynesty(self, fname):  
+        ''' Read in output from dynesty_spec
+        '''
+        f = h5py.File(fname, 'r') 
+        # observation that's being fit 
+        obvs = {} 
+        for k in f['obvs'].keys(): 
+            obvs[k] = f['obvs'][k].value
+
+        output = {} 
+        for k in f['sampling'].keys(): 
+            output[k] = f['sampling'][k].value 
+        return output, obvs
+
     def _loadSPS(self):  
         from prospect.sources import CSPSpecBasis
         self.sps = CSPSpecBasis(zcontinuous=self.zcontinuous)
+        return None 
 
     def _loadSEDmodel(self, zred=None): 
         # instantiate the model using self.model_params parameter specifications
@@ -159,7 +175,6 @@ class Prospector(object):
             self.model_params["zred"]["init"] = zred
         self.sedmodel = SedModel(self.model_params)
         return None 
-
 
 
 class Firefly(spm.StellarPopulationModel): 
