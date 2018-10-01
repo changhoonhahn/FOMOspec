@@ -78,7 +78,9 @@ class Prospector(object):
         flux, phot, mfrac = self.sedmodel.mean_model(theta, obs=obs, sps=self.sps) 
         return flux, phot, mfrac
 
-    def dynesty_spec(self, lam, flux, flux_noise, zred, nested=True, write=True, output_file=None, silent=False): 
+    def dynesty_spec(self, lam, flux, flux_noise, zred, nested=True, 
+            bound='multi', sample='unif', nlive_init=100, nlive_batch=100, 
+            write=True, output_file=None, silent=False): 
         '''
         '''
         if write and output_file is None: raise ValueError 
@@ -93,6 +95,7 @@ class Prospector(object):
         obs = {} 
         obs['wavelength'] = lam 
         obs['spectrum'] = flux 
+        obs['mask'] = np.ones(len(lam)).astype(bool)
         if flux_noise is not None: 
             obs['unc'] = flux_noise 
         else: 
@@ -110,14 +113,21 @@ class Prospector(object):
             spec, _, _ = self.model(obs['wavelength'], tt, zred, filters=None)
 
             # Calculate likelihoods
-            lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=None)
+            #lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=None)
+            mask = obs['mask'] 
+            delta = (obs['spectrum'] - spec)[mask] * 1e8 # offset for maggies
+            var = (obs['unc'][mask])**2
+            lnp_spec = -0.5 * (delta**2/var).sum() 
             return lnp_prior + lnp_spec
         
+        def prior_transform(u): 
+            return self.sedmodel.prior_transform(u)
+        
         # dynesty Fitter parameters
-        dyn_params = {'nested_bound': 'multi', # bounding method
-                      'nested_sample': 'unif', # sampling method
-                      'nested_nlive_init': 100,
-                      'nested_nlive_batch': 100,
+        dyn_params = {'nested_bound': bound, # bounding method
+                      'nested_sample': sample, # sampling method
+                      'nested_nlive_init': nlive_init,
+                      'nested_nlive_batch': nlive_batch,
                       'nested_bootstrap': 0,
                       'nested_dlogz_init': 0.05,
                       'nested_weight_kwargs': {"pfrac": 1.0},
@@ -129,7 +139,7 @@ class Prospector(object):
         tstart = time.time()  # time it
         out = fitting.run_dynesty_sampler(
                 lnPost, 
-                self.sedmodel.prior_transform, 
+                prior_transform, 
                 self.sedmodel.ndim, 
                 stop_function=stopping_function, 
                 wt_function=weight_function,
@@ -154,12 +164,13 @@ class Prospector(object):
         f = h5py.File(fname, 'r') 
         # observation that's being fit 
         obvs = {} 
-        for k in f['obvs'].keys(): 
-            obvs[k] = f['obvs'][k].value
+        for k in f['obs'].keys(): 
+            obvs[k] = f['obs'][k].value
 
         output = {} 
         for k in f['sampling'].keys(): 
             output[k] = f['sampling'][k].value 
+        f.close()
         return output, obvs
 
     def _loadSPS(self):  
