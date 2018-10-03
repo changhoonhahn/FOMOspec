@@ -17,6 +17,8 @@ from firefly_library import airtovac, convert_chis_to_probs, light_weights_to_ma
 from firefly_dust import hpf, unred, determine_attenuation
 from firefly_instrument import downgrade
 from firefly_fitter import fitter, newFitter
+# --- fomospec ---
+from . import util as UT
 
 
 dict_imfs = {'cha': 'Chabrier', 'ss': 'Salpeter', 'kr': 'Kroupa'}
@@ -78,28 +80,40 @@ class Prospector(object):
         flux, phot, mfrac = self.sedmodel.mean_model(theta, obs=obs, sps=self.sps) 
         return flux, phot, mfrac
 
-    def dynesty_spec(self, lam, flux, flux_noise, zred, nested=True, 
-            bound='multi', sample='unif', nlive_init=100, nlive_batch=100, 
-            write=True, output_file=None, silent=False): 
-        '''
+    def dynesty_spec(self, lam, flux, flux_noise, zred, mask=False, N_angstrom_masked=20., 
+            nested=True, bound='multi', sample='unif', nlive_init=100, nlive_batch=100, 
+            maxcall_init=None, maxcall=None, write=True, output_file=None, silent=False): 
+        ''' observed-frame wavelength and flux (in 10^-17 ergs/s/cm^2/Ang). There's also an 
+        option to mask the emission line regions with the `mask` kwargs. 
         '''
         if write and output_file is None: raise ValueError 
 
-        from prospect import fitting
-        from prospect.likelihood import lnlike_spec
+        from prospect import fitting #from prospect.likelihood import lnlike_spec
         import dynesty 
         from dynesty.dynamicsampler import stopping_function, weight_function
-        if self.sps is None: self._loadSPS()
-        if self.sedmodel is None: self._loadSEDmodel(zred=zred)
         # observations 
         obs = {} 
         obs['wavelength'] = lam 
         obs['spectrum'] = flux 
-        obs['mask'] = np.ones(len(lam)).astype(bool)
+        if not mask:
+            obs['mask'] = np.ones(len(lam)).astype(bool)
+        else: 
+            w_lines = np.array([3728., 4861., 5007., 6564.]) * (1. + zred) 
+            
+            lines_mask = np.ones(len(lam)).astype(bool) 
+            for wl in w_lines: 
+                inemline = ((lam > wl - N_angstrom_masked) & (lam < wl + N_angstrom_masked))
+                lines_mask = (lines_mask & ~inemline)
+            obs['mask'] = lines_mask 
+
         if flux_noise is not None: 
             obs['unc'] = flux_noise 
         else: 
             obs['unc'] = np.ones(len(lam))
+        
+        # load SPS and SED model
+        if self.sps is None: self._loadSPS()
+        if self.sedmodel is None: self._loadSEDmodel(zred=zred)
 
         def lnPost(tt, nested=nested): 
             # Calculate prior probability and return -inf if not within prior
@@ -109,13 +123,16 @@ class Prospector(object):
             if not np.isfinite(lnp_prior):
                 return -np.infty
 
-            # model(theta) 
-            spec, _, _ = self.model(obs['wavelength'], tt, zred, filters=None)
+            wave = obs['wavelength']
+            # model(theta) flux in maggies
+            spec_maggies, _, _ = self.model(wave, tt, zred, filters=None)
+            # convert to 10^-17 ergs/s/cm^2/Ang
+            spec = spec_maggies * 1e17 * UT.c_light() / wave**2 * (3631. * UT.jansky_cgs())
 
             # Calculate likelihoods
             #lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=None)
             mask = obs['mask'] 
-            delta = (obs['spectrum'] - spec)[mask] * 1e8 # offset for maggies
+            delta = (obs['spectrum'] - spec)[mask] 
             var = (obs['unc'][mask])**2
             lnp_spec = -0.5 * (delta**2/var).sum() 
             return lnp_prior + lnp_spec
@@ -130,9 +147,10 @@ class Prospector(object):
                       'nested_nlive_batch': nlive_batch,
                       'nested_bootstrap': 0,
                       'nested_dlogz_init': 0.05,
+                      'nested_maxcall_init': maxcall_init, 
+                      'nested_maxcall': maxcall, 
                       'nested_weight_kwargs': {"pfrac": 1.0},
-                      'nested_stop_kwargs': {"post_thresh": 0.1}
-                      }
+                      'nested_stop_kwargs': {"post_thresh": 0.1}}
         run_params = self.model_params.copy() 
         run_params.update(dyn_params)
     
@@ -156,6 +174,154 @@ class Prospector(object):
 
             write_results.write_hdf5(output_file, run_params, self.sedmodel, 
                     obs, out, None, tsample=duration)
+            return None
+
+    def emcee_spec(self, lam, flux, flux_noise, zred, mask=False, N_angstrom_masked=20., 
+            min_method='levenberg_marquardt', write=True, output_file=None, silent=False): 
+        ''' infer parameters using emcee
+        '''
+        if write and output_file is None: raise ValueError 
+        from prospect import fitting
+        from scipy.optimize import least_squares, minimize
+        
+        if self.sps is None: self._loadSPS()
+        if self.sedmodel is None: self._loadSEDmodel(zred=zred)
+        # observations 
+        obs = {} 
+        obs['wavelength'] = lam 
+        obs['spectrum'] = flux 
+        if not mask:
+            obs['mask'] = np.ones(len(lam)).astype(bool)
+        else: 
+            w_lines = np.array([3728., 4861., 5007., 6564.]) * (1. + zred) 
+            
+            lines_mask = np.ones(len(lam)).astype(bool) 
+            for wl in w_lines: 
+                inemline = ((lam > wl - N_angstrom_masked) & (lam < wl + N_angstrom_masked))
+                lines_mask = (lines_mask & ~inemline)
+            obs['mask'] = lines_mask 
+        if flux_noise is not None: 
+            obs['unc'] = flux_noise 
+        else: 
+            obs['unc'] = np.ones(len(lam))
+
+        def lnPost(tt): 
+            # Calculate prior probability and return -inf if not within prior
+            # Also if doing nested sampling, do not include the basic priors,
+            # since the drawing method already includes the prior probability
+            lnp_prior = self.sedmodel.prior_product(tt)
+            if not np.isfinite(lnp_prior):
+                return -np.infty
+
+            wave = obs['wavelength']
+            # model(theta) flux in maggies
+            spec_maggies, _, _ = self.model(wave, tt, zred, filters=None)
+            # convert to 10^-17 ergs/s/cm^2/Ang
+            spec = spec_maggies * 1e17 * UT.c_light() / wave**2 * (3631. * UT.jansky_cgs())
+
+            # Calculate likelihoods
+            #lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=None)
+            mask = obs['mask'] 
+            delta = (obs['spectrum'] - spec)[mask] 
+            var = (obs['unc'][mask])**2
+            lnp_spec = -0.5 * (delta**2/var).sum() 
+            return lnp_prior + lnp_spec
+
+        def chivec(tt): 
+            """A version of lnprobfn that returns the simple uncertainty
+            normalized residual instead of the log-posterior, for use with
+            least-squares optimization methods like Levenburg-Marquardt.
+
+            It's important to note that the returned chi vector does not
+            include the prior probability.
+            """
+            lnp_prior = self.sedmodel.prior_product(tt)
+            if not np.isfinite(lnp_prior):
+                return -np.infty
+
+            wave = obs['wavelength']
+            # model(theta) flux in maggies
+            try: 
+                spec_maggies, _, _ = self.model(wave, tt, zred, filters=None)
+                # convert to 10^-17 ergs/s/cm^2/Ang
+                spec = spec_maggies * 1e17 * UT.c_light() / wave**2 * (3631. * UT.jansky_cgs())
+            except ValueError: 
+                return -np.infty
+
+            mask = obs['mask'] 
+            delta = (obs['spectrum'] - spec)[mask] 
+            chi = delta/(obs['unc'][mask])
+            return chi 
+    
+        t_min0 = time.time()         
+        # minimization to get initial theta 
+        min_params = {
+                'nmin': 5, 
+                'ftol': 3e-16, 
+                'maxfev': 5000, 
+                'xtol': 3e-16, 
+                'min_method': min_method
+                } 
+        if not silent: print('initial_theta', self.sedmodel.initial_theta)
+        # draw initial values from the (1d, separable, independent) priors 
+        # for each parameter.
+        pinitial = fitting.minimizer_ball(self.sedmodel.initial_theta.copy(), 
+                min_params['nmin'], self.sedmodel)
+        if not silent: print('pinitial', pinitial)
+        guesses = []
+        for i, pinit in enumerate(pinitial): #loop over initial guesses
+            res = least_squares(chivec, np.array(pinit), method='lm', x_scale='jac',
+                    xtol=min_params["xtol"], ftol=min_params["ftol"], 
+                    max_nfev=min_params["maxfev"])
+            if not silent: print('res', i, res)
+            guesses.append(res)
+
+        ## Calculate chi-square of the results, and choose the best one
+        ## fitting.reinitialize moves the parameter vector away from edges of the prior.
+        chisq = [np.sum(r.fun**2) for r in guesses]
+        best = np.argmin(chisq)
+        theta_best = fitting.reinitialize(guesses[best].x, self.sedmodel,
+                                          edge_trunc=min_params.get('edge_trunc', 0.1))
+        if not silent: 
+            print('minimum chisq theta', theta_best) 
+            t_min = (time.time() - t_min0)/60.
+            print('minimization takes %f' % t_min)
+
+        # run emcee
+        emcee_params = {
+                'nwalkers': 128,    # number of emcee walkers
+                'niter': 512,       # number of iterations in each round of burn-in 
+                # After each round, the walkers are reinitialized based on the 
+                # locations of the highest probablity half of the walkers.
+                'nburn': [16, 32, 64],
+                # The following number controls how often the chain is written to disk. 
+                # This can be useful to make sure that not all is lost if the code dies 
+                # during a long MCMC run. It ranges from 0 to 1; the current chains will 
+                # be written out every `interval` * `niter` iterations. The default is 1, 
+                # i.e. only write out at the end of the run.
+                'interval': 0.25 # write out after every 25% of the sampling is completed.
+                } 
+        run_params = self.model_params.copy() 
+        run_params.update(emcee_params)
+
+        initial_center = theta_best.copy()
+        
+        hfile = h5py.File(output_file, 'a') 
+        out = fitting.run_emcee_sampler(lnPost, initial_center, self.sedmodel,
+                                pool=None, hdf5=hfile, **run_params)
+        if not write: 
+            return out  
+        else: 
+            from prospect.io import write_results
+            if not silent: print("Writing to %s" % output_file)
+
+            esampler, burn_loc0, burn_prob0 = out
+            write_results.write_hdf5(hfile, run_params, self.sedmodel, obs, 
+                         esampler, guesses,
+                         toptimize=pdur, tsample=edur,
+                         sampling_initial_center=initial_center,
+                         post_burnin_center=burn_loc0,
+                         post_burnin_prob=burn_prob0)
             return None
 
     def read_dynesty(self, fname):  
