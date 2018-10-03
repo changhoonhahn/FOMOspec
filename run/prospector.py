@@ -37,7 +37,7 @@ def prospector_mockdata(infer_method='dynesty'):
     return None 
 
 
-def prospector_LGAL_sourceSpec_i(galid, infer_method='dynesty'): 
+def prospector_LGAL_sourceSpec_i(galid, mask=False, infer_method='dynesty'): 
     ''' run prospector on L-Gal source spectra 
     '''
     # read in source spectra
@@ -47,21 +47,21 @@ def prospector_LGAL_sourceSpec_i(galid, infer_method='dynesty'):
 
     zred = f_inspec[0].header['REDSHIFT']
     wave = specin['wave']
-    flux = specin['flux_dust_nonoise'] * 1e-4 * 1e7 # in units of erg/s/A/cm2
-    # convert to maggies 
-    flux = flux / UT.c_light() * wave**2 / (3631. *  UT.jansky_cgs()) # maggies 
+    flux = specin['flux_dust_nonoise'] * 1e3 * 1e17 # in units of erg/s/A/cm2
 
     prosp = Fitters.Prospector()
-    if infer_method == 'dynesty': 
-        # run dynamic nested sampling 
-        f_name = ''.join(['prospector.dynesty.gal_spectrum_', str(galid), '_BGS_template_BC03_Stelib.h5']) 
-        prosp.dynesty_spec(wave, flux, None, zred, 
-                nested=True, maxcall_init=50000, maxcall=100000, 
+
+    str_mask = ''
+    if mask: str_mask = '.masked'
+    f_name = ''.join([UT.dat_dir(), 'Lgal/templates/', 
+        'prospector.', infer_method, str_mask, 
+        '.gal_spectrum_', str(galid), '_BGS_template_BC03_Stelib.h5']) 
+    if infer_method == 'dynesty': # run dynamic nested sampling 
+        prosp.dynesty_spec(wave, flux, None, zred, nested=True, maxcall_init=50000, maxcall=100000, 
                 write=True, output_file=f_name) 
-    elif infer_method == 'emcee': 
-        # emcee 
-        prosp.emcee_spec(mock_lam, mock_flux, None, zred, 
-                write=True, output_file=''.join([UT.dat_dir(), 'prospector_emcee_mock_test.h5']))
+    elif infer_method == 'emcee': # emcee 
+        prosp.emcee_spec(wave, flux, flux_unc, zred, mask=mask, 
+                write=True, output_file=f_name, silent=False)
     return None 
 
 
@@ -81,31 +81,19 @@ def prospector_LGAL_desiSpec_i(galid, mask=False, infer_method='dynesty'):
     wave = np.concatenate([spec_desi.wave[b] for b in ['b', 'r', 'z']]) 
     flux = np.concatenate([spec_desi.flux[b][0] for b in ['b', 'r', 'z']]) # 10-17 ergs/s/cm2/AA
     flux_unc = np.concatenate([spec_desi.ivar[b][0]**-0.5 for b in ['b', 'r', 'z']]) 
-    #flux *= 1e-17 / UT.c_light() * wave**2 / (3631. *  UT.jansky_cgs()) # maggies 
-    #flux_unc *= 1e-17 / UT.c_light() * wave**2 / (3631. *  UT.jansky_cgs()) # maggies 
-    #plt.errorbar(wave, flux, flux_unc, fmt='.k')
-    #plt.ylim([0., flux.max()]) 
-    #plt.show() 
-    #raise ValueError
     
     prosp = Fitters.Prospector()
-    if infer_method == 'dynesty': 
-        # run dynamic nested sampling 
-        if mask:
-            f_name = ''.join(['prospector.dynesty.masked.gal_spectrum_', str(galid), '_BGS_template_BC03_Stelib.h5']) 
-        else: 
-            f_name = ''.join(['prospector.dynesty.gal_spectrum_', str(galid), '_BGS_template_BC03_Stelib.h5']) 
+
+    str_mask = ''
+    if mask: str_mask = '.masked'
+    f_name = ''.join([UT.dat_dir(), 'Lgal/spectra/', 
+        'prospector.', infer_method, str_mask, 
+        '.desi_out_gal_spectrum_', str(galid), '_BGS_template_BC03_Stelib.h5']) 
+    if infer_method == 'dynesty': # run dynamic nested sampling 
         prosp.dynesty_spec(wave, flux, flux_unc, zred, mask=mask,
                 nested=True, maxcall_init=25000, maxcall=50000, 
                 write=True, output_file=f_name) 
-    elif infer_method == 'emcee': 
-        # emcee 
-        if mask:
-            f_name = ''.join([UT.dat_dir(), 
-                'prospector.emcee.masked.gal_spectrum_', str(galid), '_BGS_template_BC03_Stelib.h5']) 
-        else: 
-            f_name = ''.join([UT.dat_dir(), 
-                'prospector.emcee.gal_spectrum_', str(galid), '_BGS_template_BC03_Stelib.h5']) 
+    elif infer_method == 'emcee': # emcee 
         prosp.emcee_spec(wave, flux, flux_unc, zred, mask=mask, 
                 write=True, output_file=f_name, silent=False)
     return None 
@@ -117,7 +105,10 @@ if __name__=="__main__":
 
     if type == 'source': 
         galid = sys.argv[3] 
-        prospector_LGAL_sourceSpec_i(galid, infer_method=infer)
+        imask = int(sys.argv[4]) 
+        if imask == 0: mask = False
+        elif imask == 1: mask = True
+        prospector_LGAL_sourceSpec_i(galid, mask=mask, infer_method=infer)
     elif type == 'desi': 
         galid = sys.argv[3] 
         imask = int(sys.argv[4]) 

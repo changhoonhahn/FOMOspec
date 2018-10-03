@@ -77,7 +77,8 @@ class Prospector(object):
         # for spectrophotometry add in sedmodel.spe_calibration parameters
         # see https://github.com/bd-j/prospector/blob/master/prospect/models/sedmodel.py
         
-        flux, phot, mfrac = self.sedmodel.mean_model(theta, obs=obs, sps=self.sps) 
+        flux, phot, mfrac = self.sedmodel.mean_model(theta, obs=obs, sps=self.sps) # in maggies
+        flux *= 1e17 * UT.c_light() / lam**2 * (3631. * UT.jansky_cgs()) # convert to 10^-17 ergs/s/cm^2/Ang
         return flux, phot, mfrac
 
     def dynesty_spec(self, lam, flux, flux_noise, zred, mask=False, N_angstrom_masked=20., 
@@ -124,10 +125,8 @@ class Prospector(object):
                 return -np.infty
 
             wave = obs['wavelength']
-            # model(theta) flux in maggies
-            spec_maggies, _, _ = self.model(wave, tt, zred, filters=None)
-            # convert to 10^-17 ergs/s/cm^2/Ang
-            spec = spec_maggies * 1e17 * UT.c_light() / wave**2 * (3631. * UT.jansky_cgs())
+            # model(theta) flux [10^-17 ergs/s/cm^2/Ang]
+            spec, _, _ = self.model(wave, tt, zred, filters=None)
 
             # Calculate likelihoods
             #lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=None)
@@ -176,6 +175,21 @@ class Prospector(object):
                     obs, out, None, tsample=duration)
             return None
 
+    def read_dynesty(self, fname):  
+        ''' Read in output from dynesty_spec
+        '''
+        f = h5py.File(fname, 'r') 
+        # observation that's being fit 
+        obvs = {} 
+        for k in f['obs'].keys(): 
+            obvs[k] = f['obs'][k].value
+
+        output = {} 
+        for k in f['sampling'].keys(): 
+            output[k] = f['sampling'][k].value 
+        f.close()
+        return output, obvs
+
     def emcee_spec(self, lam, flux, flux_noise, zred, mask=False, N_angstrom_masked=20., 
             min_method='levenberg_marquardt', write=True, output_file=None, silent=False): 
         ''' infer parameters using emcee
@@ -214,10 +228,8 @@ class Prospector(object):
                 return -np.infty
 
             wave = obs['wavelength']
-            # model(theta) flux in maggies
-            spec_maggies, _, _ = self.model(wave, tt, zred, filters=None)
-            # convert to 10^-17 ergs/s/cm^2/Ang
-            spec = spec_maggies * 1e17 * UT.c_light() / wave**2 * (3631. * UT.jansky_cgs())
+            # model(theta) flux [10^-17 ergs/s/cm^2/Ang]
+            spec, _, _ = self.model(wave, tt, zred, filters=None)
 
             # Calculate likelihoods
             #lnp_spec = lnlike_spec(spec, obs=obs, spec_noise=None)
@@ -240,11 +252,9 @@ class Prospector(object):
                 return -np.infty
 
             wave = obs['wavelength']
-            # model(theta) flux in maggies
+            # model(theta) flux in [10^-17 ergs/s/cm^2/Ang]
             try: 
-                spec_maggies, _, _ = self.model(wave, tt, zred, filters=None)
-                # convert to 10^-17 ergs/s/cm^2/Ang
-                spec = spec_maggies * 1e17 * UT.c_light() / wave**2 * (3631. * UT.jansky_cgs())
+                spec, _, _ = self.model(wave, tt, zred, filters=None)
             except ValueError: 
                 return -np.infty
 
@@ -318,26 +328,16 @@ class Prospector(object):
             esampler, burn_loc0, burn_prob0 = out
             write_results.write_hdf5(hfile, run_params, self.sedmodel, obs, 
                          esampler, guesses,
-                         toptimize=pdur, tsample=edur,
                          sampling_initial_center=initial_center,
                          post_burnin_center=burn_loc0,
                          post_burnin_prob=burn_prob0)
             return None
 
-    def read_dynesty(self, fname):  
-        ''' Read in output from dynesty_spec
+    def read_emcee(self, fname): 
+        ''' read in output from emcee_spec 
         '''
         f = h5py.File(fname, 'r') 
-        # observation that's being fit 
-        obvs = {} 
-        for k in f['obs'].keys(): 
-            obvs[k] = f['obs'][k].value
-
-        output = {} 
-        for k in f['sampling'].keys(): 
-            output[k] = f['sampling'][k].value 
-        f.close()
-        return output, obvs
+        f.close() 
 
     def _loadSPS(self):  
         from prospect.sources import CSPSpecBasis
