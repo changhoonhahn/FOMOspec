@@ -316,9 +316,13 @@ class Prospector(object):
 
         initial_center = theta_best.copy()
         
+        if not silent: t_mc0 = time.time()         
         hfile = h5py.File(output_file, 'a') 
         out = fitting.run_emcee_sampler(lnPost, initial_center, self.sedmodel,
                                 pool=None, hdf5=hfile, **run_params)
+        if not silent: 
+            t_mc = (time.time() - t_mc0)/60.
+            print('emcee takes %f' % t_min)
         if not write: 
             return out  
         else: 
