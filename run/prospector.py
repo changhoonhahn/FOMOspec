@@ -47,7 +47,7 @@ def prospector_LGAL_sourceSpec_i(galid, mask=False, infer_method='dynesty'):
 
     zred = f_inspec[0].header['REDSHIFT']
     wave = specin['wave']
-    flux = specin['flux_dust_nonoise'] * 1e3 * 1e17 # in units of erg/s/A/cm2
+    flux = specin['flux_nodust_nonoise'] * 1e3 * 1e17 # in units of erg/s/A/cm2
 
     prosp = Fitters.Prospector()
 
@@ -60,7 +60,7 @@ def prospector_LGAL_sourceSpec_i(galid, mask=False, infer_method='dynesty'):
         prosp.dynesty_spec(wave, flux, None, zred, nested=True, maxcall_init=50000, maxcall=100000, 
                 write=True, output_file=f_name) 
     elif infer_method == 'emcee': # emcee 
-        prosp.emcee_spec(wave, flux, flux_unc, zred, mask=mask, 
+        prosp.emcee_spec(wave, flux, None, zred, mask=mask, 
                 write=True, output_file=f_name, silent=False)
     return None 
 
