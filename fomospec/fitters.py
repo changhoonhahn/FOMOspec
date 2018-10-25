@@ -26,7 +26,7 @@ dict_imfs = {'cha': 'Chabrier', 'ss': 'Salpeter', 'kr': 'Kroupa'}
 class Prospector(object): 
     ''' class object for spectral fitting using prospector
     '''
-    def __init__(self, zcontinuous=1, add_neb=True): 
+    def __init__(self, zcontinuous=1, dust_type=0, sfh=4, add_burst=False, add_neb=True, **kwargs): 
         from prospect.models import priors
         from prospect.models.templates import TemplateLibrary
 
@@ -35,17 +35,48 @@ class Prospector(object):
         self.TemplateLibrary = TemplateLibrary
         
         model_params = self.TemplateLibrary["parametric_sfh"]
-            
-        # Adjust priors for free parameters
-        model_params["logzsol"]["prior"] = priors.TopHat(mini=-1.0, maxi=0.1)
-        model_params["tau"]["prior"] = priors.LogUniform(mini=1e-1, maxi=1e1)
-        model_params["mass"]["prior"] = priors.LogUniform(mini=1e9, maxi=1e11)
-        model_params["tage"]["prior"] = priors.TopHat(mini=1, maxi=13.6)
-        #model_params["zred"]["prior"] = priors.TopHat(mini=0., maxi=10.)
-        #model_params["zred"]["isfree"] = True
         
-        # Add burst parameters (fixed to zero be default)
+        # default priors for free parameters
+        model_params["mass"]["prior"] = priors.LogUniform(
+                mini=10**kwargs.get('logM_min', 9), 
+                maxi=10**kwargs.get('logM_max', 11))
+        model_params["logzsol"]["prior"] = priors.TopHat(
+                mini=kwargs.get('logZsol_min', -1.), 
+                maxi=kwargs.get('logZsol_max', 0.1))
+        model_params["tage"]["prior"] = priors.TopHat(
+                mini=kwargs.get('tage_min', 1.), 
+                maxi=kwargs.get('tage_max', 13.6))
+
+        # dust model 
+        model_params['dust_type']['init'] = dust_type
+        if dust_type == 0: 
+            # dust2 describes the attenuation of old stellar light (Av)
+            model_params["dust2"]["prior"] = priors.TopHat(
+                    mini=kwargs.get('dust2_min', 0.), 
+                    maxi=kwargs.get('dust2_max', 2.))
+        else: 
+            raise NotImplementedError
+        # sfh model
+        model_params['sfh']['init'] = sfh 
+        if sfh == 4: # delayed tau model 
+            # tau defines e-folding time for the SFH, in Gyr.
+            model_params["tau"]["prior"] = priors.LogUniform(
+                    mini=kwargs.get('tau_min', 1e-1), 
+                    maxi=kwargs.get('tau_max', 1e2))
+        else: 
+            raise NotImplementedError
+        
+        # Add burst parameters (fixed to zero by default)
         model_params.update(TemplateLibrary["burst_sfh"])
+        if add_burst: 
+            # continue implementing 
+            # continue implementing 
+            # continue implementing 
+            # continue implementing 
+            # continue implementing 
+            # continue implementing 
+
+
         # Add dust emission parameters (fixed)
         model_params.update(TemplateLibrary["dust_emission"])
      
