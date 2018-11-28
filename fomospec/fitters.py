@@ -69,6 +69,7 @@ class Prospector(object):
         # Add burst parameters (fixed to zero by default)
         model_params.update(TemplateLibrary["burst_sfh"])
         if add_burst: 
+            pass
             # continue implementing 
             # continue implementing 
             # continue implementing 
