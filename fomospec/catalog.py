@@ -60,16 +60,37 @@ class LGal(object):
     def SpecFit(self, galid, type='source', lib='bc03', fit='firefly', **fitkwargs): 
         ''' Read in output files from different spectral fitters
         '''
-    
         if fit == 'firefly': 
             if 'dust' not in fitkwargs.keys(): 
                 raise ValueError("specify `dust` kwarg") 
+        elif 'prospector' in fit:
+            if 'masked' not in fitkwargs.keys(): 
+                raise ValueError("specify whether masked") 
         else: 
             raise NotImplementedError 
 
+        f_spec = self._Fspec(galid, type, lib)
         if fit == 'firefly': 
-            f_spec = self._Fspec(galid, type, lib)
             return self._readFirefly(f_spec, dust=fitkwargs['dust']) 
+        elif fit == 'prospector_mcmc': 
+            return self._readProspector(f_spec, masked=fitkwargs['masked'], infer='mcmc') 
+        else: 
+            raise NotImplementedError 
+
+    def _readProspector(self, f_spec, masked=True, infer='mcmc'): 
+        ''' read in prospector output file and return MCMC chain 
+        and posterior. 
+        '''
+        f_spec = '.'.join(f_spec.split('/')[-1].split('.')[:-1])+'.h5'
+    
+        if infer == 'mcmc': 
+            f_mc = ''.join([self._dir_lgal, 'spectra/',
+                         'prospector.emcee.masked.', f_spec]) 
+            ef = h5py.File(f_mc, 'r')
+            chain = ef['sampling']['chain'].value
+            lnp = ef['sampling']['lnprobability'].value
+            ef.close()
+            return chain,lnp 
 
     def _readFirefly(self, f_spec, dust='hpf_only'): 
         ''' read in FireFly output file 

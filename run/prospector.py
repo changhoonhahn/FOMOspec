@@ -6,8 +6,8 @@ from astropy.io import fits
 # -- desi -- 
 import desispec.io as desiIO
 # --- fomospec ---
-from FOMOspec import util as UT
-from FOMOspec import fitters as Fitters
+from fomospec import util as UT
+from fomospec import fitters as Fitters
 
 import matplotlib.pyplot as plt
 

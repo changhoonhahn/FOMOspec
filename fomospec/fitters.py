@@ -293,6 +293,7 @@ class Prospector(object):
             mask = obs['mask'] 
             delta = (obs['spectrum'] - spec)[mask] 
             chi = delta/(obs['unc'][mask])
+            print len(chi)
             return chi 
     
         t_min0 = time.time()         
