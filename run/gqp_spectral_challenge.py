@@ -311,10 +311,20 @@ def plot_lgal_bgsSpec():
 
     fig = plt.figure(figsize=(15,5))
     sub = fig.add_subplot(111)
+    snrs = [] 
     for iobs in range(8): 
         spec_i = lgal_bgsSpec(galids[0], iobs, lib='bc03', obs_sampling='spacefill')
+        band = 'b' 
+        these = ((spec_i.wave[band] > np.mean(spec_i.wave[band])-50) &
+                (spec_i.wave[band] < np.mean(spec_i.wave[band])+50) &
+                (spec_i.flux[band][0] > 0))
+        snr = np.median(spec_i.flux[band][0, these] * np.sqrt(spec_i.ivar[band][0, these]))
+        snrs.append(snr) 
+    i_sort = np.argsort(snrs) 
+    for iobs in i_sort: 
+        spec_i = lgal_bgsSpec(galids[0], iobs, lib='bc03', obs_sampling='spacefill')
         for band in ['b', 'r', 'z']: 
-            sub.plot(spec_i.wave[band], spec_i.flux[band][0], lw=0.25, c='C'+str(i))
+            sub.plot(spec_i.wave[band], spec_i.flux[band][0], lw=1, c='C'+str(iobs))
     sub.set_xlabel(r'Wavelenght [$\AA$]', fontsize=25) 
     sub.set_xlim([3600., 9800.]) 
     sub.set_ylabel(r'Flux [$10^{-17} ergs/s/cm^2/\AA$]', fontsize=25) 
@@ -333,8 +343,8 @@ if __name__=="__main__":
     #for iobs in [0]: 
     #    for galid in galids: 
     #        lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
-    for iobs in range(8): 
-        lgal_bgsSpec(galids[0], iobs, lib='bc03', obs_sampling='spacefill')
+    #for iobs in range(8): 
+    #    lgal_bgsSpec(galids[0], iobs, lib='bc03', obs_sampling='spacefill')
     #plot_obs_condition() 
     #plot_obs_SkyBrightness()
-    #plot_lgal_bgsSpec()
+    plot_lgal_bgsSpec()
