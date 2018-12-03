@@ -340,11 +340,9 @@ if __name__=="__main__":
     #obs_condition(sampling='spacefill', overwrite=True)
     #obs_SkyBrightness(sampling='spacefill', overwrite=True)
     galids = testGalIDs()
-    #for iobs in [0]: 
-    #    for galid in galids: 
-    #        lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
-    #for iobs in range(8): 
-    #    lgal_bgsSpec(galids[0], iobs, lib='bc03', obs_sampling='spacefill')
+    for iobs in range(1,8): 
+        for galid in galids: 
+            lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
     #plot_obs_condition() 
     #plot_obs_SkyBrightness()
-    plot_lgal_bgsSpec()
+    #plot_lgal_bgsSpec()
