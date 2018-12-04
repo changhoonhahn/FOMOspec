@@ -244,28 +244,32 @@ def plot_obs_condition():
 
     fig = plt.figure(figsize=(20,4))
     sub = fig.add_subplot(141)
-    sub.scatter(airmass, seeing, c='k', s=10) 
+    for i in range(len(airmass)): 
+        sub.scatter([airmass[i]], [seeing[i]], c='C'+str(i), s=20) 
     sub.set_xlabel('Airmass', fontsize=20)  
     sub.set_xlim([1., 2.]) 
     sub.set_ylabel('Seeing', fontsize=20) 
     sub.set_ylim([0.95, 1.75]) 
     
     sub = fig.add_subplot(142)
-    sub.scatter(exptime, moonfrac, c='k', s=10) 
+    for i in range(len(airmass)): 
+        sub.scatter([exptime[i]], [moonfrac[i]], c='C'+str(i), s=20) 
     sub.set_xlabel('Exposure Time', fontsize=20)  
     sub.set_xlim([400., 1200.]) 
     sub.set_ylabel('Moon Fraction', fontsize=20) 
     sub.set_ylim([0.5, 1.]) 
     
     sub = fig.add_subplot(143)
-    sub.scatter(moonsep, moonalt, c='k', s=10) 
+    for i in range(len(airmass)): 
+        sub.scatter([moonsep[i]], [moonalt[i]], c='C'+str(i), s=20) 
     sub.set_xlabel('Moon Separation', fontsize=20)  
     sub.set_xlim([40., 120.]) 
     sub.set_ylabel('Moon Altitude', fontsize=20) 
     sub.set_ylim([-90, 90.]) 
     
     sub = fig.add_subplot(144)
-    sub.scatter(sunsep, sunalt, c='k', s=10) 
+    for i in range(len(airmass)): 
+        sub.scatter([sunsep[i]], [sunalt[i]], c='C'+str(i), s=10) 
     sub.set_xlabel('Sun Separation', fontsize=20)  
     sub.set_xlim([40., 180.]) 
     sub.set_ylabel('Sun Altitude', fontsize=20) 
@@ -282,7 +286,7 @@ def plot_obs_SkyBrightness():
     fig = plt.figure(figsize=(15,5))
     sub = fig.add_subplot(111)
     for i in range(skybrights.shape[0]):
-        sub.plot(w_sky, skybrights[i,:], lw=1) 
+        sub.plot(w_sky, skybrights[i,:], lw=1, c='C'+str(i)) 
     sub.set_xlabel(r'Wavelenght [$\AA$]', fontsize=25) 
     sub.set_xlim([3600., 9800.]) 
     sub.set_ylabel(r'Sky Surface Brightness', fontsize=25) 
@@ -339,10 +343,10 @@ def plot_lgal_bgsSpec():
 if __name__=="__main__": 
     #obs_condition(sampling='spacefill', overwrite=True)
     #obs_SkyBrightness(sampling='spacefill', overwrite=True)
-    galids = testGalIDs()
-    for iobs in range(1,8): 
-        for galid in galids: 
-            lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
-    #plot_obs_condition() 
-    #plot_obs_SkyBrightness()
+    #galids = testGalIDs()
+    #for iobs in range(1,8): 
+    #    for galid in galids: 
+    #        lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
+    plot_obs_condition() 
+    plot_obs_SkyBrightness()
     #plot_lgal_bgsSpec()
