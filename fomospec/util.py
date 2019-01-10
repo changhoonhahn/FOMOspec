@@ -4,7 +4,31 @@ General utility functions
 
 '''
 import os
+import h5py
 import numpy as np
+
+
+def readFirefly(f_ffly): 
+    ''' Read in firefly fitting output file
+    '''
+    f = h5py.File(f_ffly, 'r')
+    output = {} 
+    for g in f.keys(): 
+        if g != 'properties': 
+            output[g] = f[g].value
+            
+    props = {} 
+    for k in f['properties'].keys(): 
+        props[k] = f['properties'][k].value
+    return output, props
+
+
+def readProspector(f_pros): 
+    ef = h5py.File(f_pros, 'r')
+    chain = ef['sampling']['chain'].value
+    lnp = ef['sampling']['lnprobability'].value
+    ef.close()
+    return chain,lnp 
 
 
 def check_env(): 
