@@ -233,25 +233,26 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
     
     fig = plt.figure(figsize=(7,7))
     sub = fig.add_subplot(111)
-    sub.hist(np.log10(mtot_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2)  
+    sub.hist(np.log10(mtot_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
     sub.hist(np.log10(mstar_ffly_source), range=(9,12), bins=20, histtype='step', 
-            color='k', linewidth=1, linestyle=':')
+            color='k', linewidth=1, linestyle=':', label='source')
     sub.hist(np.log10(mstar_ffly_source_nodust), range=(9,12), bins=20, histtype='step', 
-            color='r', linewidth=1, linestyle=':')
+            color='r', linewidth=1, linestyle=':', label='source (no dust)')
     for iobs in obs: 
         sub.hist(np.log10(mstar_ffly_obs[iobs]), range=(9,12), bins=20, histtype='step', 
-                color='C'+str(iobs), linewidth=1)
+                color='C'+str(iobs), linewidth=1, label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
     sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
     sub.set_xlim([9, 12])
+    sub.legend(loc='upper right', frameon=True, fontsize=20) 
     fig.savefig(''.join([UT.fig_dir(), 
         'mstar_hist.', f_firefly.rsplit('/', 1)[1].rsplit('__', 1)[0], '.png']), bbox_inches='tight') 
 
     fig = plt.figure(figsize=(7,7))
     sub = fig.add_subplot(111)
-    sub.scatter(mtot_input, mstar_ffly_source, s=10, color='k')
-    sub.scatter(mtot_input, mstar_ffly_source_nodust, s=10, color='r')
+    sub.scatter(mtot_input, mstar_ffly_source, s=10, color='k', label='source')
+    sub.scatter(mtot_input, mstar_ffly_source_nodust, s=10, color='r', label='source (no dust)')
     for iobs in obs: 
-        sub.scatter(mtot_input, mstar_ffly_obs[iobs], s=5, color='C'+str(iobs))
+        sub.scatter(mtot_input, mstar_ffly_obs[iobs], s=5, color='C'+str(iobs), label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
     sub.plot([1e8, 1e12], [1e8,1e12], c='k', ls='--')
     sub.set_xlabel(r'$M_*^\mathrm{(input)}$ [$M_\odot$]', fontsize=25) 
     sub.set_xscale('log')
@@ -259,16 +260,20 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
     sub.set_ylabel(r'$M_*^\mathrm{(firefly)}$ [$M_\odot$]', fontsize=25) 
     sub.set_yscale('log')
     sub.set_ylim([1e8, 1e12])
+    sub.legend(loc='upper left', markerscale=5, handletextpad=0, fontsize=20) 
     fig.savefig(''.join([UT.fig_dir(), 
         'mstar_comparison.', f_firefly.rsplit('/', 1)[1].rsplit('__', 1)[0], '.png']), bbox_inches='tight') 
 
     fig = plt.figure(figsize=(7,7))
     sub = fig.add_subplot(111)
+    sub.hist(np.log10(mtot_input) - np.log10(mstar_ffly_source), range=(-1,5), bins=20, color='k', histtype='stepfilled', alpha=0.5, label='source')
+    sub.hist(np.log10(mtot_input) - np.log10(mstar_ffly_source_nodust), range=(-1,5), bins=20, color='r', histtype='stepfilled', alpha=0.5, label='source (no dust)')
     for iobs in obs: 
-        sub.hist(np.log10(mtot_input) - np.log10(mstar_ffly_obs[iobs]), range=(0,5), bins=20, histtype='step', 
-                color='C'+str(iobs), linewidth=1)
+        sub.hist(np.log10(mtot_input) - np.log10(mstar_ffly_obs[iobs]), range=(-1,5), bins=20, histtype='stepfilled', alpha=0.5,
+                color='C'+str(iobs), label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
     sub.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(firefly)}\,)$ ', fontsize=25) 
-    sub.set_xlim([9, 12])
+    sub.set_xlim([-1, 5])
+    sub.legend(loc='upper right', fontsize=20) 
     fig.savefig(''.join([UT.fig_dir(), 
         'dmstar_hist.', f_firefly.rsplit('/', 1)[1].rsplit('__', 1)[0], '.png']), bbox_inches='tight') 
     return None 
@@ -626,11 +631,13 @@ if __name__=="__main__":
     #obs_SkyBrightness(sampling='spacefill', overwrite=True)
     galids = testGalIDs()
     for iobs in [0]: #range(1,8): 
-        for galid in galids: 
+        for ii, galid in enumerate(galids): 
+            #print('--- %i ---' % ii) 
             #lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
-            firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
+            #firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
             #firefly_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
             #firefly_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
+            pass
     firefly_Mstar() 
     #plot_obs_condition() 
     #plot_obs_SkyBrightness()
