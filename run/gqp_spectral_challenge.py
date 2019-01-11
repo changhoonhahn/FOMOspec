@@ -38,7 +38,7 @@ mpl.rcParams['legend.frameon'] = False
 ####################################################
 # firefly fitting
 ####################################################
-def firefly_lgal_sourceSpec(galid, lib='bc03', model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
+def firefly_lgal_sourceSpec(galid, dust=True, lib='bc03', model='m11', model_lib='MILES', imf='cha', hpf_mode='on'): 
     ''' run firefly on simulated source spectra from testGalIDs LGal
     '''
     # read in source spectra
@@ -46,14 +46,22 @@ def firefly_lgal_sourceSpec(galid, lib='bc03', model='m11', model_lib='MILES', i
     redshift = specin['meta']['REDSHIFT']
     
     gspec = Spec.GSfirefly()
-    gspec.generic(specin['wave'], specin['flux_dust_nonoise'],  redshift=redshift)
+    if dust: 
+        gspec.generic(specin['wave'], specin['flux_dust_nonoise'],  redshift=redshift)
+    else: 
+        gspec.generic(specin['wave'], specin['flux_nodust_nonoise'],  redshift=redshift)
     gspec.path_to_spectrum = UT.dat_dir()
 
     # output firefly file 
     f_specin = f_Source(galid, lib=lib)
-    f_firefly = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
-        'firefly.', model, '.', model_lib, '.imf_', imf, '.dust_', hpf_mode, '__', 
-        f_specin.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.hdf5']) 
+    if dust: 
+        f_firefly = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
+            'firefly.', model, '.', model_lib, '.imf_', imf, '.dust_', hpf_mode, '__', 
+            f_specin.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.hdf5']) 
+    else: 
+        f_firefly = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
+            'firefly.', model, '.', model_lib, '.imf_', imf, '.dust_', hpf_mode, '__', 
+            f_specin.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.nodust.hdf5']) 
     
     firefly = Fitters.Firefly(gspec,
             f_firefly, # output file 
@@ -181,12 +189,13 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
     '''
     obscond = obs_condition(sampling=obs_sampling) 
     galids = testGalIDs()
-    obs = range(8)
+    obs = [0]#range(8)
 
-    mstar_ffly_source, mstar_ffly_obs = [], [] 
+    mtot_ffly_source, mtot_ffly_source_nodust, mtot_ffly_obs = [], [], [] 
+    mstar_ffly_source, mstar_ffly_source_nodust, mstar_ffly_obs = [], [], [] 
     mtot_input, mdisk_input, mbulg_input = [], [], [] 
     for iobs in obs: 
-        mstar_ffly = []
+        mstar_ffly, mtot_ffly = [], []
         for galid in galids: 
             # read firefly fitting output  
             f_bgs = f_BGSspec(galid, iobs, lib=lib, obs_sampling=obs_sampling, nobs=obscond.shape[0])
@@ -208,8 +217,18 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
                     'firefly.', model, '.', model_lib, '.imf_', imf, '.dust_', hpf_mode, '__', 
                     f_specin.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.hdf5']) 
                 ffly_out, ffly_prop = UT.readFirefly(f_firefly_s) 
+                mtot_ffly_source.append(10**ffly_prop['total_mass'])
                 mstar_ffly_source.append(10**ffly_prop['stellar_mass'])
+                
+                # source no dust firefly file 
+                f_firefly_s = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
+                    'firefly.', model, '.', model_lib, '.imf_', imf, '.dust_', hpf_mode, '__', 
+                    f_specin.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.nodust.hdf5']) 
+                ffly_out, ffly_prop = UT.readFirefly(f_firefly_s) 
+                mtot_ffly_source_nodust.append(10**ffly_prop['total_mass'])
+                mstar_ffly_source_nodust.append(10**ffly_prop['stellar_mass'])
 
+        mtot_ffly_obs.append(mstar_ffly) 
         mstar_ffly_obs.append(mstar_ffly) 
     
     fig = plt.figure(figsize=(7,7))
@@ -217,6 +236,8 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
     sub.hist(np.log10(mtot_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2)  
     sub.hist(np.log10(mstar_ffly_source), range=(9,12), bins=20, histtype='step', 
             color='k', linewidth=1, linestyle=':')
+    sub.hist(np.log10(mstar_ffly_source_nodust), range=(9,12), bins=20, histtype='step', 
+            color='r', linewidth=1, linestyle=':')
     for iobs in obs: 
         sub.hist(np.log10(mstar_ffly_obs[iobs]), range=(9,12), bins=20, histtype='step', 
                 color='C'+str(iobs), linewidth=1)
@@ -227,7 +248,8 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
 
     fig = plt.figure(figsize=(7,7))
     sub = fig.add_subplot(111)
-    sub.scatter(mtot_input, mstar_ffly_source, s=5, color='C'+str(iobs))
+    sub.scatter(mtot_input, mstar_ffly_source, s=10, color='k')
+    sub.scatter(mtot_input, mstar_ffly_source_nodust, s=10, color='r')
     for iobs in obs: 
         sub.scatter(mtot_input, mstar_ffly_obs[iobs], s=5, color='C'+str(iobs))
     sub.plot([1e8, 1e12], [1e8,1e12], c='k', ls='--')
@@ -606,7 +628,7 @@ if __name__=="__main__":
     for iobs in [0]: #range(1,8): 
         for galid in galids: 
             #lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
-            firefly_lgal_sourceSpec(galid, lib='bc03', hpf_mode='on')
+            firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
             #firefly_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
             #firefly_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
     firefly_Mstar() 
