@@ -279,6 +279,111 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
     return None 
 
 ####################################################
+# prospector fitting
+####################################################
+def prospector_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=False, infer_method='dynesty'): 
+    ''' run prospector on simulated DESI BGS spectra from testGalIDs LGal
+    '''
+    obscond = obs_condition(sampling=obs_sampling) 
+    if iobs >= obscond.shape[0]: raise ValueError
+
+    # read in source spectra
+    f_inspec = fits.open(f_Source(galid, lib=lib))
+    redshift = f_inspec[0].header['REDSHIFT']
+    
+    # read in simulated DESI bgs spectra
+    f_bgsspec = f_BGSspec(galid, iobs, lib=lib, obs_sampling=obs_sampling, nobs=obscond.shape[0])
+    if not os.path.isfile(f_bgsspec): raise ValueError('spectra file does not exist')
+    spec_desi = read_spectra(f_bgsspec)
+    
+    wave = np.concatenate([spec_desi.wave[b] for b in ['b', 'r', 'z']]) 
+    flux = np.concatenate([spec_desi.flux[b][0] for b in ['b', 'r', 'z']]) # 10-17 ergs/s/cm2/AA
+    flux_unc = np.concatenate([spec_desi.ivar[b][0]**-0.5 for b in ['b', 'r', 'z']]) 
+    
+    # output firefly file 
+    str_mask = ''
+    if mask: str_mask = '.masked'
+    f_bgs = f_BGSspec(galid, iobs, lib=lib, obs_sampling=obs_sampling, nobs=obscond.shape[0])
+    f_prosp = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
+        'prospector.', infer_method, str_mask, '__', 
+        f_bgs.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.h5']) 
+    
+    prosp = Fitters.Prospector()
+    if infer_method == 'dynesty': # run dynamic nested sampling 
+        prosp.dynesty_spec(wave, flux, flux_unc, redshift, mask=mask,
+                nested=True, maxcall_init=25000, maxcall=50000, 
+                write=True, output_file=f_prosp) 
+    elif infer_method == 'emcee': # emcee 
+        prosp.emcee_spec(wave, flux, flux_unc, redshift, mask=mask, 
+                write=True, output_file=f_prosp, silent=False)
+    return None 
+
+
+def prospector_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=False, infer_method='dynesty'):
+    obscond = obs_condition(sampling=obs_sampling) 
+    if iobs >= obscond.shape[0]: raise ValueError
+    
+    # read in source spectra and meta data 
+    specin = lgal_sourceSpectra(galid, lib=lib)
+    zred = specin['meta']['REDSHIFT'] 
+    
+    # read in simulated DESI bgs spectra
+    _spec_desi = lgal_bgsSpec(galid, iobs, lib=lib, obs_sampling=obs_sampling) 
+    spec_desi = {}  
+    spec_desi['wave'] = np.concatenate([_spec_desi.wave[b] for b in ['b', 'r', 'z']])
+    spec_desi['flux'] = np.concatenate([_spec_desi.flux[b][0] for b in ['b', 'r', 'z']]) # 10-17 ergs/s/cm2/AA
+    spec_desi['flux_unc'] = np.concatenate([_spec_desi.ivar[b][0]**-0.5 for b in ['b', 'r', 'z']])
+
+    # output firefly file 
+    str_mask = ''
+    if mask: str_mask = '.masked'
+    f_bgs = f_BGSspec(galid, iobs, lib=lib, obs_sampling=obs_sampling, nobs=obscond.shape[0])
+    f_prosp = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
+        'prospector.', infer_method, str_mask, '__', 
+        f_bgs.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.h5']) 
+    chain, lnp = UT.readProspector(f_prosp) 
+
+    imax = np.argmax(lnp)
+    i, j = np.unravel_index(imax, lnp.shape)
+    
+    prosp = Fitters.Prospector()
+    tt_map_d = chain[i,j,:]
+    flux_map, _, _ = prosp.model(spec_desi['wave'], tt_map_d, zred)
+
+    # spectra comparison
+    fig = plt.figure(figsize=(15,5))
+    sub = fig.add_subplot(111)
+    sub.plot(spec_desi['wave'], spec_desi['flux'], c='k', lw=0.5, label='DESI-like')
+    sub.plot(specin['wave'], specin['flux'], c='C0', lw=1, label='Source')
+    sub.plot(spec_desi['wave'], flux_map, c='C1', lw=1, label='Prospector best-fit')
+    sub.legend(loc='upper right', fontsize=20)
+    sub.set_xlabel('Wavelength [$\AA$]', fontsize=25)
+    sub.set_xlim([spec_desi['wave'].min(), spec_desi['wave'].max()])
+    sub.set_ylabel('flux [$10^{-17} erg/s/cm^2/\AA$]', fontsize=25)
+    sub.set_ylim([0., 2.*specin['flux'][(specin['wave'] > spec_desi['wave'].min()) & (specin['wave'] < spec_desi['wave'].max())].max()])
+    fig.savefig(''.join([f_prosp.rsplit('/', 1)[0], '/', 
+        '_spectra.', f_prosp.rsplit('/', 1)[1].rsplit('.', 1)[0], '.png']), bbox_inches='tight') 
+    
+    # compare inferred properties to input properties
+    gal_input = LGalInput(galid) 
+    fig = plt.figure(figsize=(7,4))
+    sub = fig.add_subplot(111)
+    sub.plot(gal_input['sfh_t'], gal_input['sfh_disk'], color='C0', label='disk')
+    sub.plot(gal_input['sfh_t'], gal_input['sfh_bulge'], color='red', label='bulge')
+    sub.plot(gal_input['sfh_t'], gal_input['sfh_bulge'] + gal_input['sfh_disk'], color='black', label='total')
+    chain_flat = chain.reshape(chain.shape[0] * chain.shape[1], chain.shape[2])
+    mmed = np.percentile(chain_flat[:,4], [50])
+    sub.plot([0., 15.], [mmed, mmed], c='k', ls='--', label='Firefly')
+    sub.set_xlabel('Lookback time (Gyr)', fontsize=25)
+    sub.set_xlim([1e-2, 13.])
+    sub.set_ylabel(r'Mass formed (M$_\odot$)', fontsize=25)
+    sub.set_yscale('log')
+    sub.set_ylim([1e8, 5e10])
+    fig.savefig(''.join([f_prosp.rsplit('/', 1)[0], '/', 
+        '_mstar.', f_prosp.rsplit('/', 1)[1].rsplit('.', 1)[0], '.png']), bbox_inches='tight') 
+    return None
+
+####################################################
 # forward modeling DESI BGS-like test spectra
 ####################################################
 def f_Source(galid, lib='bc03'): 
@@ -297,6 +402,7 @@ def f_BGSspec(galid, iobs, lib='bc03', obs_sampling='spacefill', nobs=8):
     fsource = fsource.rsplit('/',1)[1].rsplit('.', 1)[0] 
     return ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
         'BGSsim.', fsource, '.obscond_', obs_sampling, '.', str(iobs+1), 'of', str(nobs), '.fits']) 
+
 
 def LGalInput(galid): 
     f_input = ''.join([UT.dat_dir(), 'Lgal/gal_inputs/', 
@@ -631,14 +737,15 @@ if __name__=="__main__":
     #obs_SkyBrightness(sampling='spacefill', overwrite=True)
     galids = testGalIDs()
     for iobs in [0]: #range(1,8): 
-        for ii, galid in enumerate(galids): 
-            #print('--- %i ---' % ii) 
+        for ii, galid in enumerate(galids[1:2]): 
+            print('--- %i ---' % ii) 
             #lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
             #firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
             #firefly_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
             #firefly_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
-            pass
-    firefly_Mstar() 
+            prospector_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=True, infer_method='emcee')
+            prospector_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=True, infer_method='emcee')
+    #firefly_Mstar() 
     #plot_obs_condition() 
     #plot_obs_SkyBrightness()
     #plot_lgal_bgsSpec()

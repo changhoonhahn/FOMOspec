@@ -3,9 +3,9 @@ import h5py
 import time
 import warnings 
 import numpy as np 
+import multiprocessing
 from astropy import units as U
 from astropy.cosmology import Planck13 as cosmo
-
 from estimations_3d import estimation
 
 # --- prospector --- 
@@ -350,8 +350,10 @@ class Prospector(object):
         
         if not silent: t_mc0 = time.time()         
         hfile = h5py.File(output_file, 'a') 
+
         out = fitting.run_emcee_sampler(lnPost, initial_center, self.sedmodel,
-                                pool=None, hdf5=hfile, **run_params)
+                hdf5=hfile, **run_params)
+
         if not silent: 
             t_mc = (time.time() - t_mc0)/60.
             print('emcee takes %f' % t_min)
