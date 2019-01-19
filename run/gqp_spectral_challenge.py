@@ -365,10 +365,10 @@ def firefly_Mstar(lib='bc03', obs_sampling='spacefill', model='m11', model_lib='
 
     fig = plt.figure(figsize=(7,7))
     sub = fig.add_subplot(111)
-    sub.scatter(mtot_input, mstar_ffly_source, s=10, color='k', label='source')
-    sub.scatter(mtot_input, mstar_ffly_source_nodust, s=10, color='r', label='source (no dust)')
+    sub.scatter(mtot_input, mtot_ffly_source, s=10, color='k', label='source')
+    sub.scatter(mtot_input, mtot_ffly_source_nodust, s=10, color='r', label='source (no dust)')
     for iobs in obs: 
-        sub.scatter(mtot_input, mstar_ffly_obs[iobs], s=5, color='C'+str(iobs), label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
+        sub.scatter(mtot_input, mtot_ffly_obs[iobs], s=5, color='C'+str(iobs), label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
     sub.plot([1e8, 1e12], [1e8,1e12], c='k', ls='--')
     sub.set_xlabel(r'$M_*^\mathrm{(input)}$ [$M_\odot$]', fontsize=25) 
     sub.set_xscale('log')
@@ -856,12 +856,12 @@ if __name__=="__main__":
         for ii, galid in enumerate(galids): 
             print('--- %i ---' % ii) 
             #lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
-            firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
-            firefly_lgal_sourceSpec_validate(galid, dust=False, lib='bc03', hpf_mode='on')
-            firefly_lgal_sourceSpec(galid, dust=True, lib='bc03', hpf_mode='on')
-            firefly_lgal_sourceSpec_validate(galid, dust=True, lib='bc03', hpf_mode='on')
-            firefly_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
-            firefly_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
+            #firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
+            #firefly_lgal_sourceSpec_validate(galid, dust=False, lib='bc03', hpf_mode='on')
+            #firefly_lgal_sourceSpec(galid, dust=True, lib='bc03', hpf_mode='on')
+            #firefly_lgal_sourceSpec_validate(galid, dust=True, lib='bc03', hpf_mode='on')
+            #firefly_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
+            #firefly_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', hpf_mode='on')
             #prospector_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=True, infer_method='emcee')
             #prospector_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=True, infer_method='emcee')
             pass
