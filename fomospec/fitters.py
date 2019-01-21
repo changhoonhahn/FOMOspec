@@ -474,7 +474,7 @@ class myFirefly(object):
             z = np.array([0.5, 1.0, 2.0, 10**-1.301, 10**-1.302, 10**-2.301, 
                 10**-2.302, 10**-2.300, 10**-0.6, 10**-0.9, 10**-1.2, 10**-1.6, 10**-1.9]) 
             
-        elif self.models == 'm09':
+        elif self.model == 'm09':
             if self.downgraded_models:
                 model_path = ''.join([dir_sp, 'UVmodels_Marastonetal08b_downgraded'])
             else:
@@ -522,17 +522,24 @@ class myFirefly(object):
                     flux_model.append(mf*attenuations)
                 else:
                     flux_model.append(mf)
-                age_model.append(age)
+                age_model.append(age) # Gyr
                 metal_model.append(met) 
         return wavelength, np.array(flux_model), np.array(age_model), np.array(metal_model)
 	
-    def Fit(self, wave, flux, err, zred, mask=None vdisp=, r_instrument=, ebv_mw=, silent=True):
+    def Fit(self, wave, flux, err, zred, mask=None, vdisp=None, r_instrument=None, ebv_mw=None, silent=True):
         ''' Once the data and models are loaded, then execute this function to 
         find the best model. It loops overs the models to be fitted on the data:
         #. gets the models
         #. matches the model and data to the same resolution
         #. normalises the spectra
         '''
+        if vdisp is None: 
+            vdisp = 70. 
+        if r_instrument is None: 
+            r_instrument = self._r_instrument_default(wave)
+        if ebv_mw is None: 
+            ebv_mw = 0.
+
         wave_rest = wave / (1. + zred) 
 
         if not silent: print("1. getting the models")
@@ -600,7 +607,7 @@ class myFirefly(object):
                 model_metal, 
                 self.pdf_sampling, 
                 self.d_lum, 
-                self.flux_units)
+                1e-17)
         
         unique_ages = np.unique(age_model)
         marginalised_age_weights = np.zeros(unique_ages.shape)
@@ -611,29 +618,13 @@ class myFirefly(object):
         best_fit_index = [np.argmin(chis)]
         best_fit = np.dot(light_weights[best_fit_index], model_flux)[0]
 
-        # stores outputs in the object
-        self.wave = wave
-        self.model_flux = model_flux
-        self.best_fit_index = best_fit_index
-        self.best_fit = best_fit
-        self.age_model = np.array(age_model)
-        self.metal_model = np.array(metal_model)
-
-        self.mass_weights = mass_weights
-        self.light_weights = light_weights
-        self.chis = chis
-        self.branch = branch
-        self.unnorm_mass = unnorm_mass
-        self.probs = probs
-        self.averages = averages
-
-        bf_mass = (self.mass_weights[self.best_fit_index] > 0)[0]
-        bf_light = (self.light_weights[self.best_fit_index] > 0)[0]
-        mass_per_ssp = self.unnorm_mass[self.best_fit_index[0]][bf_mass] * self.flux_units * 4 * np.pi * self.dist_lum**2.0 
-        age_per_ssp = self.age_model[bf_mass]
-        metal_per_ssp = self.metal_model[bf_mass]
-        weight_mass_per_ssp = self.mass_weights[self.best_fit_index[0]][bf_mass]
-        weight_light_per_ssp = self.light_weights[self.best_fit_index[0]][bf_light]
+        bf_mass = (mass_weights[best_fit_index] > 0)[0]
+        bf_light = (light_weights[best_fit_index] > 0)[0]
+        mass_per_ssp = unnorm_mass[best_fit_index[0]][bf_mass] * 1e-17 * 4 * np.pi * self.d_lum**2.0 
+        age_per_ssp = age_model[bf_mass]
+        metal_per_ssp = metal_model[bf_mass]
+        weight_mass_per_ssp = mass_weights[best_fit_index[0]][bf_mass]
+        weight_light_per_ssp = light_weights[best_fit_index[0]][bf_light]
         order = np.argsort(-weight_light_per_ssp)
 
         final_ML_totM, final_ML_alive, final_ML_wd, final_ML_ns, final_ML_bh, final_ML_turnoff, final_gas_fraction = self._get_massloss_factors(imf, mass_per_ssp, age_per_ssp, metal_per_ssp)
@@ -645,161 +636,110 @@ class myFirefly(object):
         combined_ML_ns = np.sum(final_ML_ns)
         combined_ML_bh = np.sum(final_ML_bh)		
         combined_gas_fraction = np.sum(mass_per_ssp - final_ML_totM)
+       
+        ff_fit = {} 
+        ff_fit['wavelength'] = wave
+        ff_fit['flux'] = data_flux
+        ff_fit['flux_err'] = error_flux 
+        ff_fit['flux_model'] = best_fit 
+
+        ff_prop = {} 
+        ff_prop['redshift'] = zred
+        ff_prop['imf'] = self.imf 
+        ff_prop['model'] = self.model_lib 
+        ff_prop['model_lib'] = self.model 
+        ff_prop['prior_age'] = self.age_lim
+        ff_prop['prior_logZ'] = self.logZ_lim
+    
+        # age and metallicity 
+        for w in ['light', 'mass']: 
+            ff_prop['age_'+w+'W'] = averages[w+'_age'] # Gyr
+            ff_prop['logZ_'+w+'W'] = np.log10(averages[w+'_metal'])
+            for i_q in np.arange(1,4).astype(str): 
+                ff_prop['age_'+w+'W_up_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_plus']
+                ff_prop['age_'+w+'W_up_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_plus']
+                ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metallicity_'+i_q+'_sig_plus'])
+                ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metallicity_'+i_q+'_sig_plus'])
+
+        # total stellar mass 
+        ff_prop['logM_total'] = np.log10(averages['stellar_mass'])
+        for i_q in np.arange(1,4).astype(str):  
+            ff_prop['logM_total_up_'+i_q+'sig'] = np.log10(averages['stellar_mass_'+i_q+'_sig_plus'])
+            ff_prop['logM_total_low_'+i_q+'sig'] = np.log10(averages['stellar_mass_'+i_q+'_sig_minus'])
+
+        ff_prop['logM_stellar'] = np.log10(combined_ML_alive+combined_ML_wd+combined_ML_ns+combined_ML_bh)
+        ff_prop['logM_living_stars'] = trylog10(combined_ML_alive)
+        ff_prop['logM_remnant'] = trylog10(combined_ML_wd+combined_ML_ns+combined_ML_bh)
+        ff_prop['logM_remnant_in_whitedwarfs'] = trylog10(combined_ML_wd)
+        ff_prop['logM_remnant_in_neutronstars'] = trylog10(combined_ML_ns)
+        ff_prop['logM_remnant_blackholes'] = trylog10(combined_ML_bh)
+        ff_prop['logM_mass_of_ejecta'] = trylog10(combined_gas_fraction)
         
-        if self.f_output is not None:  
+        ff_prop['n_ssp'] =len(order)
+        for i in range(len(order)): # quantities per SSP
+            ff_prop['logM_total_ssp_'+str(iii)] = np.log10(mass_per_ssp[order][iii])
+            ff_prop['logM_stellar_ssp_'+str(iii)] = np.log10(final_ML_alive[order][iii]+final_ML_wd[order][iii]+final_ML_ns[order][iii]+final_ML_bh[order][iii])
+            ff_prop['logM_living_stars_ssp_'+str(iii)] = np.log10(final_ML_alive[order][iii])	
+            ff_prop['logM_remnant_ssp_'+str(iii)] = np.log10(final_ML_wd[order][iii]+final_ML_ns[order][iii]+final_ML_bh[order][iii])
+            ff_prop['logM_remnant_in_whitedwarfs_ssp_'+str(iii)] = np.log10(final_ML_wd[order][iii])
+            ff_prop['logM_remnant_in_neutronstars_ssp_'+str(iii)] = np.log10(final_ML_ns[order][iii])
+            ff_prop['logM_remnant_in_blackholes_ssp_'+str(iii)] = np.log10(final_ML_bh[order][iii])
+            ff_prop['logM_mass_of_ejecta_ssp_'+str(iii)] = np.log10(mass_per_ssp[order][iii] - final_ML_totM[order][iii])
+            ff_prop['age_ssp_'+str(iii)] = age_per_ssp[order][iii] # Gyr
+            ff_prop['logZ_ssp_'+str(iii)] = np.log10(metal_per_ssp[order][iii])
+            ff_prop['logSFR_ssp_'+str(iii)] = np.log10(mass_per_ssp[order][iii]/age_per_ssp[order][iii])	
+            ff_prop['weightMass_ssp_'+str(iii)] = weight_mass_per_ssp[order][iii]
+            ff_prop['weightLight_ssp_'+str(iii)] = weight_light_per_ssp[order][iii]
+        
+        if self.dust_corr: 
+            ff_prop['ebv'] = best_ebv
+
+        if self.f_output is None:  
             if not silent: print('write to %s' % self.f_output) 
             f = h5py.File(self.f_output, 'w') 
-            f.create_dataset('wavelength', data=wave) 
-            f.create_dataset('flux', data=data_flux) 
-            f.create_dataset('flux_err', data=error_flux) 
-            f.create_dataset('firefly_model', data=best_fit) 
-    
-            f.attr['redshift'] = zred
-            f.attr['imf'] = self.imf 
-            f.attr['model'] = self.model_lib 
-            for k in ['age', 'metallicity']:
-                for w in ['light', 'mass']: 
-                    if k == 'age':
-                        #### check age output units!
-                        #### check age output units!
-                        #### check age output units!
-                        #### check age output units!
-                        #### check age output units!
-                        #### check age output units!
-                        #### check age output units!
-                        f.attr['age_'+w+'W'] = np.log10(averages[w+'_age'])
-                    elif k == 'metallicity': 
-                        f.attr['metallicity_'+w+'W'] = np.log10(averages[w+'_metal'])
+            for k in ff_fit.keys():
+                f.create_dataset(k, data=ff_fit[k]) 
 
-                    for q in ['_up_1sig', '_low_1sig', '_up_2sig', '_low_2sig', '_up_3sig', '_low_3sig']:
-                        f.attr[k+'_'+w+q]
+            for k in ff_prop.keys(): 
+                f.attr[k] = ff_prop[k] 
+            
+        return ff_fit, ff_prop
 
+    def _get_massloss_factors(self, imf, mass_per_ssp, age_per_ssp, metal_per_ssp): 
+        # Gets the mass loss factors.
+       dict_imfs = {'ss': 'salpeter', 'cha': 'chabrier', 'kr': 'kroupa'} 
+       f_ml = '/'.join([os.environ['STELLARPOPMODELS_DIR'],'data','massloss_'+str(dict_imfs[imf])+'.txt'])
+       ML_metallicity, ML_age, ML_totM, ML_alive, ML_wd, ML_ns, ML_bh, ML_turnoff = np.loadtxt(f_ml, 
+               unpack=True, skiprows=2)
 
-            tbhdu.header['HIERARCH Age_unit'] = 'log (age/Gyr)'
-            tbhdu.header['HIERARCH Metallicity_unit'] = '[Z/H]'
-            tbhdu.header['HIERARCH Mass_unit'] = 'log (M/Msun)'
-            tbhdu.header['HIERARCH SSP_sfr'] = 'log (M*/Age(Gyr))'			
-            tbhdu.header['HIERARCH converged'] = 'True'
+       # First build the grids of the quantities. Make sure they are in linear units.                  
+       estimate_ML_totM = estimation(10**ML_metallicity, ML_age, ML_totM) 
+       estimate_ML_alive = estimation(10**ML_metallicity, ML_age, ML_alive) 
+       estimate_ML_wd = estimation(10**ML_metallicity, ML_age, ML_wd) 
+       estimate_ML_ns = estimation(10**ML_metallicity, ML_age, ML_ns) 
+       estimate_ML_bh = estimation(10**ML_metallicity, ML_age, ML_bh)
+       estimate_ML_turnoff = estimation(10**ML_metallicity, ML_age, ML_turnoff) 
 
-            tbhdu.header['HIERARCH age_lightW'] = trylog10(averages['light_age'])
-            tbhdu.header['HIERARCH age_lightW_up_1sig'] = trylog10(averages['light_age_1_sig_plus'])
-            tbhdu.header['HIERARCH age_lightW_low_1sig'] = trylog10(averages['light_age_1_sig_minus'])
-            tbhdu.header['HIERARCH age_lightW_up_2sig'] = trylog10(averages['light_age_2_sig_plus'])
-            tbhdu.header['HIERARCH age_lightW_low_2sig'] = trylog10(averages['light_age_2_sig_minus'])
-            tbhdu.header['HIERARCH age_lightW_up_3sig'] = trylog10(averages['light_age_3_sig_plus'])
-            tbhdu.header['HIERARCH age_lightW_low_3sig'] = trylog10(averages['light_age_3_sig_minus'])
-            tbhdu.header['HIERARCH metallicity_lightW'] = trylog10(averages['light_metal'])
-            tbhdu.header['HIERARCH metallicity_lightW_up_1sig'] = trylog10(averages['light_metal_1_sig_plus'])
-            tbhdu.header['HIERARCH metallicity_lightW_low_1sig'] = trylog10(averages['light_metal_1_sig_minus'])
-            tbhdu.header['HIERARCH metallicity_lightW_up_2sig'] = trylog10(averages['light_metal_2_sig_plus'])
-            tbhdu.header['HIERARCH metallicity_lightW_low_2sig'] = trylog10(averages['light_metal_2_sig_minus'])
-            tbhdu.header['HIERARCH metallicity_lightW_up_3sig'] = trylog10(averages['light_metal_3_sig_plus'])
-            tbhdu.header['HIERARCH metallicity_lightW_low_3sig'] = trylog10(averages['light_metal_3_sig_minus'])
-            tbhdu.header['HIERARCH age_massW'] = trylog10(averages['mass_age'])
-            tbhdu.header['HIERARCH age_massW_up_1sig'] = trylog10(averages['mass_age_1_sig_plus'])
-            tbhdu.header['HIERARCH age_massW_low_1sig'] = trylog10(averages['mass_age_1_sig_minus'])
-            tbhdu.header['HIERARCH age_massW_up_2sig'] = trylog10(averages['mass_age_2_sig_plus'])
-            tbhdu.header['HIERARCH age_massW_low_2sig'] = trylog10(averages['mass_age_2_sig_minus'])
-            tbhdu.header['HIERARCH age_massW_up_3sig'] = trylog10(averages['mass_age_3_sig_plus'])
-            tbhdu.header['HIERARCH age_massW_low_3sig'] = trylog10(averages['mass_age_3_sig_minus'])
-            tbhdu.header['HIERARCH metallicity_massW'] = trylog10(averages['mass_metal'])
-            tbhdu.header['HIERARCH metallicity_massW_up_1sig'] = trylog10(averages['mass_metal_1_sig_plus'])
-            tbhdu.header['HIERARCH metallicity_massW_low_1sig'] = trylog10(averages['mass_metal_1_sig_minus'])
-            tbhdu.header['HIERARCH metallicity_massW_up_2sig'] = trylog10(averages['mass_metal_2_sig_plus'])
-            tbhdu.header['HIERARCH metallicity_massW_low_2sig'] = trylog10(averages['mass_metal_2_sig_minus'])
-            tbhdu.header['HIERARCH metallicity_massW_up_3sig'] = trylog10(averages['mass_metal_3_sig_plus'])
-            tbhdu.header['HIERARCH metallicity_massW_low_3sig'] = trylog10(averages['mass_metal_3_sig_minus'])
+       # Now loop through SSPs to find the nearest values for each.
+       final_ML_totM, final_ML_alive, final_ML_wd, final_ML_ns = [], [], [], [] 
+       final_ML_bh, final_ML_turnoff, final_gas_fraction = [], [], []
+       for i in range(len(age_per_ssp)):
+           new_ML_totM = estimate_ML_totM.estimate(metal_per_ssp[i], age_per_ssp[i])
+           new_ML_alive = estimate_ML_alive.estimate(metal_per_ssp[i], age_per_ssp[i])
+           new_ML_wd = estimate_ML_wd.estimate(metal_per_ssp[i], age_per_ssp[i])
+           new_ML_ns = estimate_ML_ns.estimate(metal_per_ssp[i], age_per_ssp[i])
+           new_ML_bh = estimate_ML_bh.estimate(metal_per_ssp[i], age_per_ssp[i])
+           new_ML_turnoff = estimate_ML_turnoff.estimate(metal_per_ssp[i], age_per_ssp[i]) 
 
-            tbhdu.header['HIERARCH total_mass'] = trylog10(averages['stellar_mass'])
-            tbhdu.header['HIERARCH stellar_mass'] = trylog10(combined_ML_alive+combined_ML_wd+combined_ML_ns+combined_ML_bh)
-            tbhdu.header['HIERARCH living_stars_mass'] = trylog10(combined_ML_alive)
-            tbhdu.header['HIERARCH remnant_mass'] = trylog10(combined_ML_wd+combined_ML_ns+combined_ML_bh)
-            tbhdu.header['HIERARCH remnant_mass_in_whitedwarfs'] = trylog10(combined_ML_wd)
-            tbhdu.header['HIERARCH remnant_mass_in_neutronstars'] = trylog10(combined_ML_ns)
-            tbhdu.header['HIERARCH remnant_mass_blackholes'] = trylog10(combined_ML_bh)
-            tbhdu.header['HIERARCH mass_of_ejecta'] = trylog10(combined_gas_fraction)
-            tbhdu.header['HIERARCH total_mass_up_1sig'] = trylog10(averages['stellar_mass_1_sig_plus'])
-            tbhdu.header['HIERARCH total_mass_low_1sig'] = trylog10(averages['stellar_mass_1_sig_minus'])
-            tbhdu.header['HIERARCH total_mass_up_2sig'] = trylog10(averages['stellar_mass_2_sig_plus'])
-            tbhdu.header['HIERARCH total_mass_low_2sig'] = trylog10(averages['stellar_mass_2_sig_minus'])
-            tbhdu.header['HIERARCH total_mass_up_3sig'] = trylog10(averages['stellar_mass_3_sig_plus'])
-            tbhdu.header['HIERARCH total_mass_low_3sig'] = trylog10(averages['stellar_mass_3_sig_minus'])
-            tbhdu.header['HIERARCH EBV'] = best_ebv
-            tbhdu.header['HIERARCH ssp_number'] =len(order)
-        
-        			# quantities per SSP
-        			for iii in range(len(order)):
-        				tbhdu.header['HIERARCH total_mass_ssp_'+str(iii)] = trylog10(mass_per_ssp[order][iii])
-					tbhdu.header['HIERARCH stellar_mass_ssp_'+str(iii)] = trylog10(final_ML_alive[order][iii]+final_ML_wd[order][iii]+final_ML_ns[order][iii]+final_ML_bh[order][iii])
-					tbhdu.header['HIERARCH living_stars_mass_ssp_'+str(iii)] = trylog10(final_ML_alive[order][iii])	
-					tbhdu.header['HIERARCH remnant_mass_ssp_'+str(iii)] = trylog10(final_ML_wd[order][iii]+final_ML_ns[order][iii]+final_ML_bh[order][iii])
-        				tbhdu.header['HIERARCH remnant_mass_in_whitedwarfs_ssp_'+str(iii)] = trylog10(final_ML_wd[order][iii])
-        				tbhdu.header['HIERARCH remnant_mass_in_neutronstars_ssp_'+str(iii)] = trylog10(final_ML_ns[order][iii])
-        				tbhdu.header['HIERARCH remnant_mass_in_blackholes_ssp_'+str(iii)] = trylog10(final_ML_bh[order][iii])
-        				tbhdu.header['HIERARCH mass_of_ejecta_ssp_'+str(iii)] = trylog10(mass_per_ssp[order][iii] - final_ML_totM[order][iii])
-        				tbhdu.header['HIERARCH log_age_ssp_'+str(iii)] = trylog10(age_per_ssp[order][iii])
-        				tbhdu.header['HIERARCH metal_ssp_'+str(iii)] = trylog10(metal_per_ssp[order][iii])
-        				tbhdu.header['HIERARCH SFR_ssp_'+str(iii)] = trylog10(mass_per_ssp[order][iii]/age_per_ssp[order][iii])	
-        				tbhdu.header['HIERARCH weightMass_ssp_'+str(iii)] = weight_mass_per_ssp[order][iii]
-        				tbhdu.header['HIERARCH weightLight_ssp_'+str(iii)] = weight_light_per_ssp[order][iii]
-        
-			self.tbhdu = tbhdu
-        
-			prihdr = pyfits.Header()
-			prihdr['file'] = self.specObs.path_to_spectrum
-			prihdr['model'] = self.models
-			prihdr['ageMin'] = self.age_limits[0]
-			prihdr['ageMax'] = self.age_limits[1]
-			prihdr['Zmin'] = self.Z_limits[0]
-			prihdr['Zmax'] = self.Z_limits[1]
-			prihdu = pyfits.PrimaryHDU(header=prihdr)
-			self.thdulist = pyfits.HDUList([prihdu, tbhdu])
+           final_ML_totM.append(mass_per_ssp[i]*new_ML_totM)
+           final_ML_alive.append(mass_per_ssp[i]*new_ML_alive)
+           final_ML_wd.append(mass_per_ssp[i]*new_ML_wd)
+           final_ML_ns.append(mass_per_ssp[i]*new_ML_ns)
+           final_ML_bh.append(mass_per_ssp[i]*new_ML_bh)
+           final_ML_turnoff.append(mass_per_ssp[i]*new_ML_turnoff)
+           final_gas_fraction.append(mass_per_ssp[i] - new_ML_totM)
 
-			if self.write_results :
-				if os.path.isfile(self.outputFile + self.suffix ):
-					os.remove(self.outputFile + self.suffix )
-				#print self.outputFile + self.suffix , thdulist, thdulist[1].data, thdulist[0].header
-				self.thdulist.writeto(self.outputFile + self.suffix )
-				return 1.
-
-			else :
-				return 0.
-
-       def _get_massloss_factors(self, imf, mass_per_ssp, age_per_ssp, metal_per_ssp): 
-           # Gets the mass loss factors.
-           dict_imfs = {'ss': 'salpeter', 'cha': 'chabrier', 'kr': 'kroupa'} 
-           f_ml = '/'.join([os.environ['STELLARPOPMODELS_DIR'],'data','massloss_'+str(dict_imfs[imf])'.txt'])
-           ML_metallicity, ML_age, ML_totM, ML_alive, ML_wd, ML_ns, ML_bh, ML_turnoff = np.loadtxt(f_ml, 
-                   unpack=True, skiprows=2)
-
-           # First build the grids of the quantities. Make sure they are in linear units.                  
-           estimate_ML_totM = estimation(10**ML_metallicity, ML_age, ML_totM) 
-           estimate_ML_alive = estimation(10**ML_metallicity, ML_age, ML_alive) 
-           estimate_ML_wd = estimation(10**ML_metallicity, ML_age, ML_wd) 
-           estimate_ML_ns = estimation(10**ML_metallicity, ML_age, ML_ns) 
-           estimate_ML_bh = estimation(10**ML_metallicity, ML_age, ML_bh)
-           estimate_ML_turnoff = estimation(10**ML_metallicity, ML_age, ML_turnoff) 
-
-           # Now loop through SSPs to find the nearest values for each.
-           final_ML_totM, final_ML_alive, final_ML_wd, final_ML_ns = [], [], [], [] 
-           final_ML_bh, final_ML_turnoff, final_gas_fraction = [], [], []
-           for i in range(len(age_per_ssp)):
-               new_ML_totM = estimate_ML_totM.estimate(metal_per_ssp[i], age_per_ssp[i])
-               new_ML_alive = estimate_ML_alive.estimate(metal_per_ssp[i], age_per_ssp[i])
-               new_ML_wd = estimate_ML_wd.estimate(metal_per_ssp[i], age_per_ssp[i])
-               new_ML_ns = estimate_ML_ns.estimate(metal_per_ssp[i], age_per_ssp[i])
-               new_ML_bh = estimate_ML_bh.estimate(metal_per_ssp[i], age_per_ssp[i])
-               new_ML_turnoff = estimate_ML_turnoff.estimate(metal_per_ssp[i], age_per_ssp[i]) 
-
-               final_ML_totM.append(mass_per_ssp[i]*new_ML_totM)
-               final_ML_alive.append(mass_per_ssp[i]*new_ML_alive)
-               final_ML_wd.append(mass_per_ssp[i]*new_ML_wd)
-               final_ML_ns.append(mass_per_ssp[i]*new_ML_ns)
-               final_ML_bh.append(mass_per_ssp[i]*new_ML_bh)
-               final_ML_turnoff.append(mass_per_ssp[i]*new_ML_turnoff)
-               final_gas_fraction.append(mass_per_ssp[i] - new_ML_totM)
-
-            return np.array(final_ML_totM), np.array(final_ML_alive), np.array(final_ML_wd), np.array(final_ML_ns), np.array(final_ML_bh), np.array(final_ML_turnoff), np.array(final_gas_fraction)
+        return np.array(final_ML_totM), np.array(final_ML_alive), np.array(final_ML_wd), np.array(final_ML_ns), np.array(final_ML_bh), np.array(final_ML_turnoff), np.array(final_gas_fraction)
 
     def _match_data_models(self, w_d, flux_d, err_d, w_m, flux_m, mask=None, silent=True): 
         '''
@@ -914,6 +854,13 @@ class myFirefly(object):
             else:
                 deltal_lib.append(3.6)
         return deltal_lib
+    
+    def _r_instrument_default(self, wave): 
+        r_instrument = np.zeros(len(wave))
+        low_w = (w < 6000.) 
+        r_instrument[low_w] = (2270.0-1560.0)/(6000.0-3700.0) * wave[low_w] + 420.0 
+        r_instrument[~low_w] = (2650.0-1850.0)/(9000.0-6000.0) * wave[~low_w] + 250.0 
+        return r_instrument
 
 
 class Firefly(spm.StellarPopulationModel): 
