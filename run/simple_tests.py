@@ -8,6 +8,7 @@ import h5py
 import fsps
 import numpy as np
 from astropy.cosmology import FlatLambdaCDM
+from firefly_fitter import fitter
 # --- fomospec ---
 from fomospec import util as UT 
 from fomospec import spectra as Spec
@@ -32,6 +33,39 @@ age_bounds = np.array(((0.000,0.0025,0.005),(0.005,0.010,0.015),(0.015,0.020,0.0
 
 Z_mid = [-2.5, -2.05, -1.75, -1.45, -1.15, -0.85, -0.55, -0.35, -0.25, -0.15, -0.05, 0.05, 0.15, 0.25, 0.4, 0.5]
 
+def simple_SSP(z_metal, zred=0.01):
+    ''' construct spectra of simple stellar population with single metallicity, no dust, no nonsense  
+    '''
+    cosmo = FlatLambdaCDM(70., 0.3) 
+
+    sp = fsps.StellarPopulation(zcontinuous=1, sfh=0, logzsol=np.log10(z_metal),
+            imf_type=1, dust_type=0, dust_index=0.)
+    
+
+    wave, spec = sp.get_spectrum(peraa=False)  # Lsun/Hz
+    # convert flux to ergs/s/cm^2/AA
+    #d_lum = cosmo.luminosity_distance(zred).value * 1e6 * UT.parsec() # luminosity distance (pc) 
+    #spec *= UT.Lsun() * UT.c_light() / wave**2 / (4 * np.pi * d_lum**2)
+    #print spec
+    
+    # save spectra 
+    f_spec = ''.join([UT.dat_dir(), 
+            'SSP.z_metal', str(z_metal), '.z', str(zred), '.dat'])
+    np.savetxt(f_spec, np.vstack([wave, np.sum(spec, axis=0)]).T)
+
+    fig = plt.figure(figsize=(8,4))
+    sub = fig.add_subplot(211)
+    for i in range(spec.shape[0]): 
+        sub.plot(wave, spec[i,:], lw=0.25)
+    sub.plot(wave, np.sum(spec, axis=0), c='k', lw=1)
+    sub.set_xlabel('wavelength [$A$]', fontsize=15) 
+    sub.set_xlim([3500., 1e4]) 
+    sub.set_ylabel('flux [$ergs/s/cm^2/A$]', fontsize=15) 
+    sub.set_ylim([0., np.sum(spec, axis=0)[(wave > 3000.) & (wave < 1e4)].max()])
+    
+    fig.savefig(''.join([UT.fig_dir(), 'SSP.z_metal', str(z_metal), '.z', str(zred), '.png']), bbox_inches='tight') 
+    return None 
+
 
 def simple_spectra(igal, i_metal=5, zred=0.01):
     ''' construct simple spectra with single metallicity, no dust, no nonsense  
@@ -43,19 +77,20 @@ def simple_spectra(igal, i_metal=5, zred=0.01):
     sfh = f_eagle['SFRH'].value 
     mtot = f_eagle['TotalMassFormed'].value  
 
-    sp = fsps.StellarPopulation(zcontinuous=1, sfh=3, tage=cosmo.lookback_time(zred).value)
+    sp = fsps.StellarPopulation(zcontinuous=1, sfh=3, imf_type=1, tage=cosmo.lookback_time(zred).value, dust_type=0, dust_index=0.)
     sfh = np.zeros((56,2))
-    #sfh[:,0] = 14-age_bounds[:,1][::-1]
-    sfh[:,0] = age_bounds[:,1]
-    sfh[:,1] = f_eagle['SFRH'][igal][:,i_metal]
+    sfh[:,0] = 14-age_bounds[:,1][::-1]
+    #sfh[:,0] = age_bounds[:,1]
+    sfr = f_eagle['SFRH'][igal][:,i_metal][::-1]
+    i_max = np.argmax(sfr)
+    sfh[i_max,1] = sfr[i_max] 
     sp.set_tabular_sfh(sfh[:,0],sfh[:,1]) # feed in tabulated SFH
     sp.params['logzsol'] = Z_mid[i_metal] #
-    
+    print sp.params['logzsol']  
     wave, spec = sp.get_spectrum(peraa=False)  # Lsun/Hz
     # convert flux to ergs/s/cm^2/AA
     d_lum = cosmo.luminosity_distance(zred).value * 1e6 * UT.parsec() # luminosity distance (pc) 
     spec *= UT.Lsun() * UT.c_light() / wave**2 / (4 * np.pi * d_lum**2)
-    print np.log10(np.sum(sp.stellar_mass))
     
     # save spectra 
     f_spec = ''.join([UT.dat_dir(), 
@@ -63,13 +98,98 @@ def simple_spectra(igal, i_metal=5, zred=0.01):
     np.savetxt(f_spec, np.vstack([wave, np.sum(spec, axis=0)]).T)
 
     fig = plt.figure(figsize=(8,4))
-    sub = fig.add_subplot(111)
+    sub = fig.add_subplot(211)
+    for i in range(spec.shape[0]): 
+        sub.plot(wave, spec[i,:], lw=0.25)
     sub.plot(wave, np.sum(spec, axis=0), c='k', lw=1)
-    sub.set_xlabel('wavelength [$A$]', fontsize=25) 
+    sub.set_xlabel('wavelength [$A$]', fontsize=15) 
     sub.set_xlim([3500., 1e4]) 
-    sub.set_ylabel('flux [$ergs/s/cm^2/A$]', fontsize=20) 
+    sub.set_ylabel('flux [$ergs/s/cm^2/A$]', fontsize=15) 
+    print np.log10((age_bounds[:,1] - age_bounds[:,0]) * sfh[:,1])+9.
+    print sp.formed_mass 
+    print sp.stellar_mass
+    
+    sub = fig.add_subplot(212) 
+    sub.plot(sfh[:,0], sfh[:,1]) 
+    sub.set_xlabel('Time since the beginning of the Universe', fontsize=15) 
+    sub.text(0.05, 0.95, '$\log\,Z='+str(Z_mid[i_metal])+'$; $\log\,M_*='+str(round(np.log10(np.sum(sp.stellar_mass)),2))+'$', ha='left', va='top', 
+            transform=sub.transAxes, fontsize=10)
+    sub.set_xlim([0., 14.]) 
+    sub.set_ylabel('SFH', fontsize=15) 
     fig.savefig(''.join([UT.fig_dir(), 'simple_spectra.', str(igal), '.metal', str(i_metal), '.z', str(zred), '.png']), 
     bbox_inches='tight') 
+    return None 
+
+
+def simple_myfirefly(igal, i_metal=5, zred=0.01):
+    '''
+    '''
+    cosmo = FlatLambdaCDM(70., 0.3) 
+    
+    # read in SFH and M_* 
+    f_eagle = h5py.File(''.join([UT.dat_dir(), '0EAGLE_SFRHs.hdf5']), 'r') 
+    i_max = np.argmax(f_eagle['SFRH'][igal][:,i_metal])
+    age_input = age_bounds[i_max,1]
+    logz_input = Z_mid[i_metal]
+    print('input age = %f, log Z = %f' % (age_input, logz_input))
+
+    f_spec = ''.join([UT.dat_dir(), 
+            'simple_spectra.', str(igal), '.metal', str(i_metal), '.z', str(zred), '.dat'])
+    wave, spec = np.loadtxt(f_spec, unpack=True, usecols=[0,1]) 
+    wave_rest = wave / (1. + zred) 
+    err = spec * 0.001 
+
+    ffly = Fitters.myFirefly(cosmo, model='m11', model_lib='MILES', imf='kr', dust_corr=False, 
+            age_lim=[0., 15.], logZ_lim=[logz_input-0.25, logz_input+0.25])
+    #        age_lim=[age_input-2.5, age_input+2.5], logZ_lim=[logz_input-0.25, logz_input+0.25])
+    mask = ffly.emissionlineMask(wave_rest)
+    r_inst = ffly._r_instrument_default(wave) 
+    model_wave_int, model_flux_int, model_age, model_metal = ffly.get_model(70., wave/(1.+zred), r_inst, 0., silent=False) 
+
+    fig = plt.figure()
+    sub = fig.add_subplot(111)
+    for i in range(model_flux_int.shape[0]): 
+        sub.plot(model_wave_int, model_flux_int[i,:]) 
+    sub.set_xlim([model_wave_int.min(), model_wave_int.max()]) 
+    fig.savefig(''.join([UT.fig_dir(), 'test_firefly.get_model.png']))
+
+    wave, data_flux, error_flux, model_flux_raw = ffly._match_data_models(
+            wave_rest, 
+            spec, 
+            err, 
+            model_wave_int, 
+            model_flux_int, 
+            mask=mask, 
+            silent=False)
+    data_median = np.median(data_flux)
+    model_median = np.median(model_flux_raw, axis=1) 
+    mass_factor = data_median/model_median
+    model_flux = (model_flux_raw.T / model_median).T * data_median
+
+    fig = plt.figure()
+    sub = fig.add_subplot(111)
+    for i in range(model_flux_raw.shape[0]): 
+        sub.plot(wave, model_flux[i,:]) 
+    sub.plot(wave*(1.+zred), data_flux, c='k', ls='--') 
+    sub.set_xlim([wave.min(), wave.max()]) 
+    fig.savefig(''.join([UT.fig_dir(), 'test_firefly.match_data_models.png']))
+
+    light_weights, chis, branch = fitter(wave, data_flux, error_flux, model_flux, ffly)
+    unnorm_mass = light_weights * mass_factor
+    mass_weights = unnorm_mass / np.sum(unnorm_mass, axis=0) 
+        
+    best_fit_index = [np.argmin(chis)]
+    best_fit = np.dot(light_weights[best_fit_index], model_flux)[0]
+    print model_age[0]
+    print model_metal[0] 
+    
+    fig = plt.figure()
+    sub = fig.add_subplot(111)
+    sub.plot(wave, best_fit) 
+    sub.plot(wave, model_flux[0]) 
+    sub.plot(wave*(1.+zred), data_flux, c='k', ls='--') 
+    sub.set_xlim([wave.min(), wave.max()]) 
+    fig.savefig(''.join([UT.fig_dir(), 'test_firefly.fitter.png']))
     return None 
 
 
@@ -155,6 +275,7 @@ def simple_firefly(igal, i_metal=5, zred=0.01):
 
 
 if __name__=='__main__':
-    for i in range(1,5):
-        #simple_spectra(i, i_metal=0, zred=0.01)
-        simple_firefly(i, i_metal=0, zred=0.01)
+    simple_SSP(0.1, zred=0.01)
+    #for i in [0]:
+    #    simple_spectra(i, i_metal=5, zred=0.01)
+    #    simple_myfirefly(i, i_metal=5, zred=0.01)

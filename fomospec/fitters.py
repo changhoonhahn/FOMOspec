@@ -394,28 +394,18 @@ class Prospector(object):
 
 
 class myFirefly(object): 
-    ''' my own re-written version of firefly  
-    '''
-    def __init__(self, specobj, cosmo, 
-            model='m11', model_lib='MILES', imf='kr', downgrade_models=True, 
-            dust_corr=True, dust_law='calzetti', max_ebv=1.5, num_dust_vals=200, dust_smoothing_length=200,
-            age_lim=[0, 14.], # in Gyrs
-            logZ_lim=[-0.1,0.1], 
-            wave_lim=[0,1e5], 
-            data_wave_medium='vacuum', 
-            max_iterations=10, fit_per_iteration_cap=1000, pdf_sampling=300, 
-            output=None):
-        self.cosmo = cosmo      # save cosmology 
-        self.specObj = specobj  # spectra object
-        if output is not None: 
-            self.f_output = output  
-        else: 
-            self.f_output = None 
+    ''' my own re-written version of firefly  '''
+    def __init__(self, cosmo, model='m11', model_lib='MILES', imf='kr', downgrade_models=False, 
+            dust_corr=False, dust_law='calzetti', max_ebv=1.5, num_dust_vals=200, dust_smoothing_length=200,
+            age_lim=[0, 14.], logZ_lim=[-0.1, 0.1], wave_lim=[0, 1e5], data_wave_medium='vacuum', 
+            max_iterations=10, fit_per_iteration_cap=1000, pdf_sampling=300):
+        # save cosmology 
+        self.cosmo = cosmo      
 
         # sets the models 
         self.model = model # m11 / m09
-        self.model_lib = model_libs
-        self.downgraded_models = downgraded_models
+        self.model_lib = model_lib
+        #self.downgraded_models = downgraded_models
         # get library wavelength resolution 
         self.deltal_lib = self._check_model_lib(self.model, self.model_lib, downgrade_models=downgrade_models) 
         # sets the Initial mass function
@@ -440,9 +430,7 @@ class myFirefly(object):
         # Default is air, unless manga is used
         self.data_wave_medium = data_wave_medium
         
-        self.vdisp_round = int(round(self.specObj.vdisp/5.0)*5.0) # rounding vDisp for the models 
-
-    def get_model(self, vdisp, wave_instrument, r_instrument, ebv_mw, silent=True):
+    def get_model(self, vdisp, wave_instrument, r_instrument, ebv_mw, downgraded=False, silent=True):
         ''' Retrieves all relevant model files, in their downgraded format.
         If they aren't downgraded to the correct resolution / velocity dispersion,
         takes the base models in their native form and converts to downgraded files.
@@ -454,28 +442,28 @@ class myFirefly(object):
         model_files = []
         if self.model == 'm11':
             str_model = '.'.join([self.model_lib, self.imf]) 
-            if self.downgraded_models :
-                if model_used in ['MILES_UVextended', 'MILES_revisedIRslope']:
+            if downgraded :
+                if self.model_lib in ['MILES_UVextended', 'MILES_revisedIRslope']:
                     model_path = '/'.join([dir_sp, 
                         'SSP_M11_MILES_downgraded','ssp_M11_'+str_model])
                 else: 
                     model_path = '/'.join([dir_sp,
-                        'SSP_M11_'+ model_used + '_downgraded', 'ssp_M11_'+str_model])
+                        'SSP_M11_'+self.model_lib+ '_downgraded', 'ssp_M11_'+str_model])
             else:
-                if model_used in ['MILES_UVextended', 'MILES_revisedIRslope']:
+                if self.model_lib in ['MILES_UVextended', 'MILES_revisedIRslope']:
                     model_path = '/'.join([dir_sp, 
                         'SSP_M11_MILES', 'ssp_M11_'+str_model])
                 else:
                     model_path = '/'.join([dir_sp, 
-                        'SSP_M11_'+model_used ,'ssp_M11_'+str_model])
+                        'SSP_M11_'+self.model_lib ,'ssp_M11_'+str_model])
             
-            z_strs = np.array(['z001', 'z002', 'z004', 'z0001.bhb', 'z0001.rhb', 
-                'z10m4.bhb', 'z10m4.rhb', 'z10m4', 'z-0.6', 'z-0.9', 'z-1.2', 'z-1.6', 'z-1.9']) 
-            z = np.array([0.5, 1.0, 2.0, 10**-1.301, 10**-1.302, 10**-2.301, 
-                10**-2.302, 10**-2.300, 10**-0.6, 10**-0.9, 10**-1.2, 10**-1.6, 10**-1.9]) 
+            z_strs = np.array(['z001', 'z002', 'z004', 'z0001.bhb', 'z0001.rhb', 'z10m4.bhb', 'z10m4.rhb', #'z10m4', 
+                'z-0.6', 'z-0.9', 'z-1.2', 'z-1.6', 'z-1.9']) 
+            z = np.array([0.5, 1.0, 2.0, 10**-1.301, 10**-1.302, 10**-2.301, 10**-2.302, #10**-2.300, 
+                10**-0.6, 10**-0.9, 10**-1.2, 10**-1.6, 10**-1.9]) 
             
         elif self.model == 'm09':
-            if self.downgraded_models:
+            if downgraded:
                 model_path = ''.join([dir_sp, 'UVmodels_Marastonetal08b_downgraded'])
             else:
                 model_path = ''.join([dir_sp, 'UVmodels_Marastonetal08b'])
@@ -486,7 +474,7 @@ class myFirefly(object):
             raise ValueError
     
         # keep only files with metallicities within the range 
-        inZlim = (z > 10**logZ_lim[0]) & (z < 10**logZ_lim[1]) 
+        inZlim = (z > 10**self.logZ_lim[0]) & (z < 10**self.logZ_lim[1]) 
         metal = z[inZlim] 
         metal_files = [model_path+zstr for zstr in z_strs[inZlim]]
         if not silent: print('metal files included %s from %s' % (', '.join(metal_files), model_path))
@@ -498,7 +486,7 @@ class myFirefly(object):
 
             uniq_age = np.unique(model_age) # Gyr 
             for age in uniq_age:
-                if (age < age_lim[0]) or (age > age_lim[1]): # outside of age limit 
+                if (age < self.age_lim[0]) or (age > self.age_lim[1]): # outside of age limit 
                     continue
 
                 wave = model_wave[model_age == age] 
@@ -525,7 +513,6 @@ class myFirefly(object):
                 age_model.append(age) # Gyr
                 metal_model.append(met) 
         return wavelength, np.array(flux_model), np.array(age_model), np.array(metal_model)
-	
     def Fit(self, wave, flux, err, zred, mask=None, vdisp=None, r_instrument=None, ebv_mw=None, silent=True):
         ''' Once the data and models are loaded, then execute this function to 
         find the best model. It loops overs the models to be fitted on the data:
@@ -535,6 +522,7 @@ class myFirefly(object):
         '''
         if vdisp is None: 
             vdisp = 70. 
+            vdisp_round = int(round(vdisp/5.0)*5.0) # rounding vDisp for the models 
         if r_instrument is None: 
             r_instrument = self._r_instrument_default(wave)
         if ebv_mw is None: 
@@ -590,7 +578,7 @@ class myFirefly(object):
 
         if not silent: print("mass weighted SSP contributions")
         # 5. Get mass-weighted SSP contributions using saved M/L ratio.
-        unnorm_mass = light_weights * mass_factors
+        unnorm_mass = light_weights * mass_factor
         mass_weights = unnorm_mass / np.sum(unnorm_mass, axis=0) 
 
         if not silent: print("chis into probabilities")
@@ -609,11 +597,11 @@ class myFirefly(object):
                 self.d_lum, 
                 1e-17)
         
-        unique_ages = np.unique(age_model)
+        unique_ages = np.unique(model_age)
         marginalised_age_weights = np.zeros(unique_ages.shape)
         marginalised_age_weights_int = np.sum(mass_weights.T, 1)
-        for age in unique_ages:
-            marginalised_age_weights[ua] = np.sum(marginalised_age_weights_int[age_model == age])
+        for i_a, age in enumerate(unique_ages):
+            marginalised_age_weights[i_a] = np.sum(marginalised_age_weights_int[model_age == age])
 
         best_fit_index = [np.argmin(chis)]
         best_fit = np.dot(light_weights[best_fit_index], model_flux)[0]
@@ -621,13 +609,13 @@ class myFirefly(object):
         bf_mass = (mass_weights[best_fit_index] > 0)[0]
         bf_light = (light_weights[best_fit_index] > 0)[0]
         mass_per_ssp = unnorm_mass[best_fit_index[0]][bf_mass] * 1e-17 * 4 * np.pi * self.d_lum**2.0 
-        age_per_ssp = age_model[bf_mass]
-        metal_per_ssp = metal_model[bf_mass]
+        age_per_ssp = model_age[bf_mass]
+        metal_per_ssp = model_metal[bf_mass]
         weight_mass_per_ssp = mass_weights[best_fit_index[0]][bf_mass]
         weight_light_per_ssp = light_weights[best_fit_index[0]][bf_light]
         order = np.argsort(-weight_light_per_ssp)
 
-        final_ML_totM, final_ML_alive, final_ML_wd, final_ML_ns, final_ML_bh, final_ML_turnoff, final_gas_fraction = self._get_massloss_factors(imf, mass_per_ssp, age_per_ssp, metal_per_ssp)
+        final_ML_totM, final_ML_alive, final_ML_wd, final_ML_ns, final_ML_bh, final_ML_turnoff, final_gas_fraction = self._get_massloss_factors(self.imf, mass_per_ssp, age_per_ssp, metal_per_ssp)
 
         # Calculate the total mass loss from all the SSP contributions.
         combined_ML_totM = np.sum(final_ML_totM)
@@ -638,7 +626,7 @@ class myFirefly(object):
         combined_gas_fraction = np.sum(mass_per_ssp - final_ML_totM)
        
         ff_fit = {} 
-        ff_fit['wavelength'] = wave
+        ff_fit['wavelength'] = wave # rest frame
         ff_fit['flux'] = data_flux
         ff_fit['flux_err'] = error_flux 
         ff_fit['flux_model'] = best_fit 
@@ -658,8 +646,8 @@ class myFirefly(object):
             for i_q in np.arange(1,4).astype(str): 
                 ff_prop['age_'+w+'W_up_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_plus']
                 ff_prop['age_'+w+'W_up_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_plus']
-                ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metallicity_'+i_q+'_sig_plus'])
-                ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metallicity_'+i_q+'_sig_plus'])
+                ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_plus'])
+                ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_plus'])
 
         # total stellar mass 
         ff_prop['logM_total'] = np.log10(averages['stellar_mass'])
@@ -737,9 +725,8 @@ class myFirefly(object):
            final_ML_ns.append(mass_per_ssp[i]*new_ML_ns)
            final_ML_bh.append(mass_per_ssp[i]*new_ML_bh)
            final_ML_turnoff.append(mass_per_ssp[i]*new_ML_turnoff)
-           final_gas_fraction.append(mass_per_ssp[i] - new_ML_totM)
-
-        return np.array(final_ML_totM), np.array(final_ML_alive), np.array(final_ML_wd), np.array(final_ML_ns), np.array(final_ML_bh), np.array(final_ML_turnoff), np.array(final_gas_fraction)
+           final_gas_fraction.append(mass_per_ssp[i] - new_ML_totM) 
+       return np.array(final_ML_totM), np.array(final_ML_alive), np.array(final_ML_wd), np.array(final_ML_ns), np.array(final_ML_bh), np.array(final_ML_turnoff), np.array(final_gas_fraction)
 
     def _match_data_models(self, w_d, flux_d, err_d, w_m, flux_m, mask=None, silent=True): 
         '''
@@ -750,8 +737,9 @@ class myFirefly(object):
         w_min, w_max = w_d[mask].min(), w_d[mask].max()
         if not silent: print("%f < wavelength < %f" % (w_min, w_max))
 
-        mask_m = ((w_m <= w_min) & (w_m >= w_max))
+        mask_m = ((w_m >= w_min) & (w_m <= w_max))
         if np.sum(mask_m) == 0: 
+            print('model wavelength range %f < wave < %f' % (w_m.min(), w_m.max()))
             raise ValueError("outside of model coverage")
     
         w_m = w_m[mask_m]
@@ -780,13 +768,13 @@ class myFirefly(object):
                 n_combo = len(combined_flux) 
                 for l in range(len(boundary_indices) - 1):
                     if boundary_indices[l + 1] >= n_combo:
-                        matched_model[m][l] = matched_model[m][l - 1]
+                        matched_model[i][l] = matched_model[i][l - 1]
                     else:
-                        matched_model[m][l] = np.trapz(
+                        matched_model[i][l] = np.trapz(
                                 combined_flux[boundary_indices[l]:boundary_indices[l+1]+ 1], 
                                 x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1]
                                 )
-                        matched_model[m][l] /= (
+                        matched_model[i][l] /= (
                                 combined_wave[boundary_indices[l+1]]-combined_wave[boundary_indices[l]])
             matched_wave = w_d[1:-1]
             matched_data = flux_d[1:-1]
@@ -796,22 +784,23 @@ class myFirefly(object):
             boundaries = np.searchsorted(w_d, w_m_mid)
 
             flux_d_bounds   = np.interp(w_m_mid, w_d, flux_d)
-            err_bounds 	    = np.interp(w_m_mid, w_d, err_d)
+            err_d_bounds    = np.interp(w_m_mid, w_d, err_d)
             combined_wave_int 	= np.concatenate((w_d, w_m_mid))
             combined_flux_int 	= np.concatenate((flux_d, flux_d_bounds))
-            combined_err_int 	= np.concatenate((err_d, err_d_bounds))
+            combined_error_int 	= np.concatenate((err_d, err_d_bounds))
             sort_indices        = np.argsort(combined_wave_int)
         
             combined_wave       = np.sort(combined_wave_int)
-            boundary_indices 	= np.searchsorted(combined_wave,bisect_model)
+            boundary_indices 	= np.searchsorted(combined_wave, w_m_mid)
             combined_flux 	= combined_flux_int[sort_indices]
             combined_error 	= combined_error_int[sort_indices]
 
-            matched_data    = np.zeros(len(boundary_indices) - 1), 
-            matched_error   = np.zeros(len(boundary_indices) - 1)
-
+            matched_data    = np.zeros(len(boundary_indices)-1)
+            matched_error   = np.zeros(len(boundary_indices)-1)
+            
             n_combo = len(combined_flux)
-            for l in range(len(boundary_indices) - 1):
+            for l in range(len(boundary_indices)-1):
+                # this can probably be sped up...
                 if boundary_indices[l+1] >= n_combo:
                     matched_data[l] 	= matched_data[l-1]
                     matched_error[l] 	= matched_error[l-1]
@@ -823,12 +812,12 @@ class myFirefly(object):
                             x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1])
                     matched_error[l] /= (combined_wave[boundary_indices[l+1]] - combined_wave[boundary_indices[l]])
             matched_wave = w_m[1:-1]
-            matched_model = np.zeros((num_models,len(matched_wave)))
+            matched_model = np.zeros((n_models,len(matched_wave)))
             for i in range(n_models):
                 matched_model[i][:] = flux_m[i][1:-1]
         return matched_wave, matched_data, matched_error, matched_model
 
-    def _check_model_lib(model, model_lib, downgrade_models=True):  
+    def _check_model_lib(self, model, model_lib, downgrade_models=True):  
         ''' check model libraries 
         '''
         deltal_lib = []
@@ -857,10 +846,19 @@ class myFirefly(object):
     
     def _r_instrument_default(self, wave): 
         r_instrument = np.zeros(len(wave))
-        low_w = (w < 6000.) 
+        low_w = (wave < 6000.) 
         r_instrument[low_w] = (2270.0-1560.0)/(6000.0-3700.0) * wave[low_w] + 420.0 
         r_instrument[~low_w] = (2650.0-1850.0)/(9000.0-6000.0) * wave[~low_w] + 250.0 
         return r_instrument
+    
+    def emissionlineMask(self, restframe_wavelength, N_angstrom_masked=20): 
+        ''' given restframe wavelength return mask where emission lines are 
+        '''
+        lines_mask = np.zeros(len(restframe_wavelength)).astype(bool)
+        for lam in [3728., 4861., 5007., 6564.]: 
+            lines_mask = lines_mask | ((restframe_wavelength > lam - N_angstrom_masked) & 
+                    (restframe_wavelength < lam + N_angstrom_masked))
+        return ~lines_mask 
 
 
 class Firefly(spm.StellarPopulationModel): 
