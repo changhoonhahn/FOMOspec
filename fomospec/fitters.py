@@ -397,7 +397,7 @@ class myFirefly(object):
     ''' my own re-written version of firefly  '''
     def __init__(self, cosmo, model='m11', model_lib='MILES', imf='kr', downgrade_models=False, 
             dust_corr=False, dust_law='calzetti', max_ebv=1.5, num_dust_vals=200, dust_smoothing_length=200,
-            age_lim=[0, 14.], logZ_lim=[-0.1, 0.1], wave_lim=[0, 1e5], data_wave_medium='vacuum', 
+            age_lim=[0, 14.], logZ_lim=[-0.1, 0.1], wave_lim=[0, 1e5], data_wave_medium='air', 
             max_iterations=10, fit_per_iteration_cap=1000, pdf_sampling=300):
         # save cosmology 
         self.cosmo = cosmo      
@@ -492,8 +492,8 @@ class myFirefly(object):
                 wave = model_wave[model_age == age] 
                 flux = model_flux[model_age == age]
                     
-                # converts to air wavelength
                 if self.data_wave_medium == 'vacuum':
+                    # converts air wavelength to vacuum 
                     wavelength = airtovac(wave)
                 else:
                     wavelength = wave 
@@ -512,8 +512,10 @@ class myFirefly(object):
                     flux_model.append(mf)
                 age_model.append(age) # Gyr
                 metal_model.append(met) 
+
         return wavelength, np.array(flux_model), np.array(age_model), np.array(metal_model)
-    def Fit(self, wave, flux, err, zred, mask=None, vdisp=None, r_instrument=None, ebv_mw=None, silent=True):
+
+    def Fit(self, wave, flux, err, zred, mask=None, vdisp=None, r_instrument=None, ebv_mw=None, f_output=None, silent=True):
         ''' Once the data and models are loaded, then execute this function to 
         find the best model. It loops overs the models to be fitted on the data:
         #. gets the models
@@ -538,7 +540,7 @@ class myFirefly(object):
                 ebv_mw)
 
         if not silent: print("2. match model and data resolution")
-        wave, data_flux, error_flux, model_flux_raw = self._match_data_models(
+        wave_match, data_flux, error_flux, model_flux_raw = self._match_data_models(
                 wave_rest, 
                 flux, 
                 err, 
@@ -551,7 +553,7 @@ class myFirefly(object):
             if not silent: print("Dust correction")
             # determining attenuation curve through HPF fitting, 
             # apply attenuation curve to models and renormalise spectra
-            best_ebv, attenuation_curve = determine_attenuation(wave, data_flux, error_flux, 
+            best_ebv, attenuation_curve = determine_attenuation(wave_match, data_flux, error_flux, 
                     model_flux, self, model_age, model_metal)
             model_flux_atten = np.zeros(model_flux_raw.shape)
             for m in range(len(model_flux_raw)):
@@ -574,7 +576,7 @@ class myFirefly(object):
         # this is supposed to be the essential ingredient of firefly 
         # the code is a giant mess with nested functions and classes 
         # and global variables everywhere. 
-        light_weights, chis, branch = fitter(wave, data_flux, error_flux, model_flux, self)
+        light_weights, chis, branch = fitter(wave_match, data_flux, error_flux, model_flux, self)
 
         if not silent: print("mass weighted SSP contributions")
         # 5. Get mass-weighted SSP contributions using saved M/L ratio.
@@ -582,9 +584,9 @@ class myFirefly(object):
         mass_weights = unnorm_mass / np.sum(unnorm_mass, axis=0) 
 
         if not silent: print("chis into probabilities")
-        self.dof = len(wave)
+        self.dof = len(wave_match)
         probs = convert_chis_to_probs(chis, self.dof)
-        self.d_lum = self.cosmo.luminosity_distance(zred).to(U.cm).value
+        self.d_lum = self.cosmo.luminosity_distance(zred).to(U.cm)
                         
         if not silent: print("Calculating average properties and outputting")
         averages = calculate_averages_pdf(probs, 
@@ -626,7 +628,7 @@ class myFirefly(object):
         combined_gas_fraction = np.sum(mass_per_ssp - final_ML_totM)
        
         ff_fit = {} 
-        ff_fit['wavelength'] = wave # rest frame
+        ff_fit['wavelength'] = wave_match # rest frame
         ff_fit['flux'] = data_flux
         ff_fit['flux_err'] = error_flux 
         ff_fit['flux_model'] = best_fit 
@@ -665,24 +667,24 @@ class myFirefly(object):
         
         ff_prop['n_ssp'] =len(order)
         for i in range(len(order)): # quantities per SSP
-            ff_prop['logM_total_ssp_'+str(iii)] = np.log10(mass_per_ssp[order][iii])
-            ff_prop['logM_stellar_ssp_'+str(iii)] = np.log10(final_ML_alive[order][iii]+final_ML_wd[order][iii]+final_ML_ns[order][iii]+final_ML_bh[order][iii])
-            ff_prop['logM_living_stars_ssp_'+str(iii)] = np.log10(final_ML_alive[order][iii])	
-            ff_prop['logM_remnant_ssp_'+str(iii)] = np.log10(final_ML_wd[order][iii]+final_ML_ns[order][iii]+final_ML_bh[order][iii])
-            ff_prop['logM_remnant_in_whitedwarfs_ssp_'+str(iii)] = np.log10(final_ML_wd[order][iii])
-            ff_prop['logM_remnant_in_neutronstars_ssp_'+str(iii)] = np.log10(final_ML_ns[order][iii])
-            ff_prop['logM_remnant_in_blackholes_ssp_'+str(iii)] = np.log10(final_ML_bh[order][iii])
-            ff_prop['logM_mass_of_ejecta_ssp_'+str(iii)] = np.log10(mass_per_ssp[order][iii] - final_ML_totM[order][iii])
-            ff_prop['age_ssp_'+str(iii)] = age_per_ssp[order][iii] # Gyr
-            ff_prop['logZ_ssp_'+str(iii)] = np.log10(metal_per_ssp[order][iii])
-            ff_prop['logSFR_ssp_'+str(iii)] = np.log10(mass_per_ssp[order][iii]/age_per_ssp[order][iii])	
-            ff_prop['weightMass_ssp_'+str(iii)] = weight_mass_per_ssp[order][iii]
-            ff_prop['weightLight_ssp_'+str(iii)] = weight_light_per_ssp[order][iii]
+            ff_prop['logM_total_ssp_'+str(i)] = np.log10(mass_per_ssp[order][i])
+            ff_prop['logM_stellar_ssp_'+str(i)] = np.log10(final_ML_alive[order][i]+final_ML_wd[order][i]+final_ML_ns[order][i]+final_ML_bh[order][i])
+            ff_prop['logM_living_stars_ssp_'+str(i)] = np.log10(final_ML_alive[order][i])
+            ff_prop['logM_remnant_ssp_'+str(i)] = np.log10(final_ML_wd[order][i] + final_ML_ns[order][i] + final_ML_bh[order][i])
+            ff_prop['logM_remnant_in_whitedwarfs_ssp_'+str(i)] = np.log10(final_ML_wd[order][i])
+            ff_prop['logM_remnant_in_neutronstars_ssp_'+str(i)] = np.log10(final_ML_ns[order][i])
+            ff_prop['logM_remnant_in_blackholes_ssp_'+str(i)] = np.log10(final_ML_bh[order][i])
+            ff_prop['logM_mass_of_ejecta_ssp_'+str(i)] = np.log10(mass_per_ssp[order][i] - final_ML_totM[order][i])
+            ff_prop['age_ssp_'+str(i)] = age_per_ssp[order][i] # Gyr
+            ff_prop['logZ_ssp_'+str(i)] = np.log10(metal_per_ssp[order][i])
+            ff_prop['logSFR_ssp_'+str(i)] = np.log10(mass_per_ssp[order][i]/age_per_ssp[order][i])
+            ff_prop['weightMass_ssp_'+str(i)] = weight_mass_per_ssp[order][i]
+            ff_prop['weightLight_ssp_'+str(i)] = weight_light_per_ssp[order][i]
         
         if self.dust_corr: 
             ff_prop['ebv'] = best_ebv
 
-        if self.f_output is None:  
+        if f_output is not None:  
             if not silent: print('write to %s' % self.f_output) 
             f = h5py.File(self.f_output, 'w') 
             for k in ff_fit.keys():
@@ -729,92 +731,107 @@ class myFirefly(object):
        return np.array(final_ML_totM), np.array(final_ML_alive), np.array(final_ML_wd), np.array(final_ML_ns), np.array(final_ML_bh), np.array(final_ML_turnoff), np.array(final_gas_fraction)
 
     def _match_data_models(self, w_d, flux_d, err_d, w_m, flux_m, mask=None, silent=True): 
-        '''
+        ''' match the wavelength resolution of the data and model
         '''
         if mask is None:   
             mask = np.ones(len(w_d)).astype(bool) 
-        n_models = flux_m.shape[0]
         w_min, w_max = w_d[mask].min(), w_d[mask].max()
         if not silent: print("%f < wavelength < %f" % (w_min, w_max))
+        
+        w_d = w_d[mask]
+        flux_d = flux_d[mask] 
+        err_d = err_d[mask]
 
+        n_models = flux_m.shape[0]
         mask_m = ((w_m >= w_min) & (w_m <= w_max))
-        if np.sum(mask_m) == 0: 
-            print('model wavelength range %f < wave < %f' % (w_m.min(), w_m.max()))
-            raise ValueError("outside of model coverage")
-    
+        assert np.sum(mask_m) > 0, ('outside of model wavelength range %f < wave < %f' % (w_m.min(), w_m.max()))
         w_m = w_m[mask_m]
         flux_m = flux_m[:,mask_m] 
 
-        w_d = w_d[mask]
-        flux_d = flux_d[mask] 
-        err_d =  err_d[mask]
-
-        if np.sum(mask_m) >= np.sum(mask): # model has higher wavelength resolution
-            w_d_mid = 0.5 * (w_d[1:] + w_d[:-1]) + w_d.min()*0.0000000001
-
-            matched_model = np.zeros((n_models, len(w_d_mid)-1)) 
-            for i in range(n_models):
-                flux_m_bounds = np.interp(w_d_mid, w_m, flux_m[i])
-
-                combined_wave = np.concatenate((w_m, w_d_mid))
-                combined_flux = np.concatenate((flux_m[i], flux_m_bounds))
-                sort_indices = np.argsort(combined_wave)
-               
-                combined_wave = combined_wave[sort_indices]
-                combined_flux = combined_flux[sort_indices]
-                
-                boundary_indices = np.searchsorted(combined_wave, w_d_mid) 
-
-                n_combo = len(combined_flux) 
-                for l in range(len(boundary_indices) - 1):
-                    if boundary_indices[l + 1] >= n_combo:
-                        matched_model[i][l] = matched_model[i][l - 1]
-                    else:
-                        matched_model[i][l] = np.trapz(
-                                combined_flux[boundary_indices[l]:boundary_indices[l+1]+ 1], 
-                                x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1]
-                                )
-                        matched_model[i][l] /= (
-                                combined_wave[boundary_indices[l+1]]-combined_wave[boundary_indices[l]])
+        if np.sum(mask_m) >= np.sum(mask): 
+            if not silent: print("model has higher wavelength resolution")
             matched_wave = w_d[1:-1]
             matched_data = flux_d[1:-1]
             matched_error = err_d[1:-1]
-        else:
-            w_m_mid = 0.5 * (w_m[1:]+w_m[:-1]) + w_m.min()*0.0000000001
-            boundaries = np.searchsorted(w_d, w_m_mid)
-
-            flux_d_bounds   = np.interp(w_m_mid, w_d, flux_d)
-            err_d_bounds    = np.interp(w_m_mid, w_d, err_d)
-            combined_wave_int 	= np.concatenate((w_d, w_m_mid))
-            combined_flux_int 	= np.concatenate((flux_d, flux_d_bounds))
-            combined_error_int 	= np.concatenate((err_d, err_d_bounds))
-            sort_indices        = np.argsort(combined_wave_int)
-        
-            combined_wave       = np.sort(combined_wave_int)
-            boundary_indices 	= np.searchsorted(combined_wave, w_m_mid)
-            combined_flux 	= combined_flux_int[sort_indices]
-            combined_error 	= combined_error_int[sort_indices]
-
-            matched_data    = np.zeros(len(boundary_indices)-1)
-            matched_error   = np.zeros(len(boundary_indices)-1)
-            
-            n_combo = len(combined_flux)
-            for l in range(len(boundary_indices)-1):
-                # this can probably be sped up...
-                if boundary_indices[l+1] >= n_combo:
-                    matched_data[l] 	= matched_data[l-1]
-                    matched_error[l] 	= matched_error[l-1]
-                else:
-                    matched_data[l] = np.trapz(combined_flux[boundary_indices[l]:boundary_indices[l+1]+1], 
-                            x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1])
-                    matched_data[l] /= (combined_wave[boundary_indices[l+1]] - combined_wave[boundary_indices[l]])
-                    matched_error[l] = np.trapz(combined_error[boundary_indices[l]:boundary_indices[l+1]+1], 
-                            x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1])
-                    matched_error[l] /= (combined_wave[boundary_indices[l+1]] - combined_wave[boundary_indices[l]])
+            matched_model = np.zeros((n_models, len(matched_wave)))
+            for i in range(n_models): 
+                matched_model[i,:] = np.interp(matched_wave, w_m, flux_m[i,:]) # piecewise linear interpolation 
+        else: 
+            if not silent: print("model has lower wavelength resolution") 
             matched_wave = w_m[1:-1]
-            matched_model = np.zeros((n_models,len(matched_wave)))
-            for i in range(n_models):
-                matched_model[i][:] = flux_m[i][1:-1]
+            matched_model = flux_m[:,1:-1]
+            matched_data = np.interp(matched_wave, w_d, flux_d) # piecewise linear interpolation 
+            matched_error = np.interp(matched_wave, w_d, err_d_d)
+        '''
+            if np.sum(mask_m) >= np.sum(mask): # model has higher wavelength resolution
+                if not silent: print("model has higher wavelength resolution")
+                w_d_mid = 0.5 * (w_d[1:] + w_d[:-1]) #+ w_d.min()*0.0000000001
+
+                matched_model = np.zeros((n_models, len(w_d_mid)-1)) 
+                for i in range(n_models):
+                    flux_m_bounds = np.interp(w_d_mid, w_m, flux_m[i])
+
+                    combined_wave = np.concatenate((w_m, w_d_mid))
+                    combined_flux = np.concatenate((flux_m[i], flux_m_bounds))
+                    sort_indices = np.argsort(combined_wave)
+                   
+                    combined_wave = combined_wave[sort_indices]
+                    combined_flux = combined_flux[sort_indices]
+                    
+                    boundary_indices = np.searchsorted(combined_wave, w_d_mid) 
+
+                    n_combo = len(combined_flux) 
+                    for l in range(len(boundary_indices) - 1):
+                        if boundary_indices[l + 1] >= n_combo:
+                            matched_model[i][l] = matched_model[i][l - 1]
+                        else:
+                            matched_model[i][l] = np.trapz(
+                                    combined_flux[boundary_indices[l]:boundary_indices[l+1]+ 1], 
+                                    x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1]
+                                    )
+                            matched_model[i][l] /= (
+                                    combined_wave[boundary_indices[l+1]]-combined_wave[boundary_indices[l]])
+                matched_wave = w_d[1:-1]
+                matched_data = flux_d[1:-1]
+                matched_error = err_d[1:-1]
+            else:
+                if not silent: print("model has lower wavelength resolution")
+                w_m_mid = 0.5 * (w_m[1:]+w_m[:-1]) #+ w_m.min()*0.0000000001
+                boundaries = np.searchsorted(w_d, w_m_mid)
+
+                flux_d_bounds   = np.interp(w_m_mid, w_d, flux_d)
+                err_d_bounds    = np.interp(w_m_mid, w_d, err_d)
+                combined_wave_int 	= np.concatenate((w_d, w_m_mid))
+                combined_flux_int 	= np.concatenate((flux_d, flux_d_bounds))
+                combined_error_int 	= np.concatenate((err_d, err_d_bounds))
+                sort_indices        = np.argsort(combined_wave_int)
+            
+                combined_wave       = np.sort(combined_wave_int)
+                boundary_indices 	= np.searchsorted(combined_wave, w_m_mid)
+                combined_flux 	= combined_flux_int[sort_indices]
+                combined_error 	= combined_error_int[sort_indices]
+
+                matched_data    = np.zeros(len(boundary_indices)-1)
+                matched_error   = np.zeros(len(boundary_indices)-1)
+                
+                n_combo = len(combined_flux)
+                for l in range(len(boundary_indices)-1):
+                    # this can probably be sped up...
+                    if boundary_indices[l+1] >= n_combo:
+                        matched_data[l] 	= matched_data[l-1]
+                        matched_error[l] 	= matched_error[l-1]
+                    else:
+                        matched_data[l] = np.trapz(combined_flux[boundary_indices[l]:boundary_indices[l+1]+1], 
+                                x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1])
+                        matched_data[l] /= (combined_wave[boundary_indices[l+1]] - combined_wave[boundary_indices[l]])
+                        matched_error[l] = np.trapz(combined_error[boundary_indices[l]:boundary_indices[l+1]+1], 
+                                x=combined_wave[boundary_indices[l]:boundary_indices[l+1]+1])
+                        matched_error[l] /= (combined_wave[boundary_indices[l+1]] - combined_wave[boundary_indices[l]])
+                matched_wave = w_m[1:-1]
+                matched_model = np.zeros((n_models,len(matched_wave)))
+                for i in range(n_models):
+                    matched_model[i][:] = flux_m[i][1:-1]
+        '''
         return matched_wave, matched_data, matched_error, matched_model
 
     def _check_model_lib(self, model, model_lib, downgrade_models=True):  
