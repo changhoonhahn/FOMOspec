@@ -11,6 +11,7 @@ import scipy as sp
 from astropy.io import fits 
 from astropy import units as u
 import astropy.cosmology as co
+from astropy.cosmology import Planck13 
 from astropy.table import Table
 # -- desi --
 from desispec.io import read_spectra
@@ -34,6 +35,127 @@ mpl.rcParams['ytick.labelsize'] = 'x-large'
 mpl.rcParams['ytick.major.size'] = 5
 mpl.rcParams['ytick.major.width'] = 1.5
 mpl.rcParams['legend.frameon'] = False
+
+
+####################################################
+# myfirefly fitting
+####################################################
+def myFirefly_lgal_sourceSpec(galid, dust=False, lib='bc03', model='m11', model_lib='MILES', imf='kr'): 
+    ''' run firefly on simulated source spectra from testGalIDs LGal
+    '''
+    # read in source spectra
+    specin = lgal_sourceSpectra(galid, lib=lib)
+    redshift = specin['meta']['REDSHIFT']
+    print('z = %f' % redshift) 
+    
+    wave = specin['wave']
+    wave_rest = wave / (1.+redshift) 
+    if not dust: 
+        flux = specin['flux_nodust_nonoise'] 
+
+    # output firefly file 
+    f_specin = f_Source(galid, lib=lib)
+    if not dust: 
+        f_firefly = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
+            'myFirefly.', model, '.', model_lib, '.imf_', imf, '.nodust__', 
+            f_specin.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.nodust.hdf5']) 
+
+    ffly = Fitters.myFirefly(
+            Planck13, # comsology
+            model=model, 
+            model_lib=model_lib, 
+            imf=imf, 
+            dust_corr=False,                            # no dust correction
+            age_lim=[0., Planck13.age(redshift).value],     # can't have older populations
+            logZ_lim=[-2.,1.])
+
+    mask = ffly.emissionlineMask(wave_rest)
+    ff_fit, ff_prop = ffly.Fit(wave, flux, flux*0.001, redshift, mask=mask, flux_unit=1e-17, f_output=f_firefly, silent=False)
+    print ff_prop['logM_total'] 
+    return None 
+
+
+def myFirefly_lgal_sourceSpec_validate(galid, dust=False, lib='bc03', obs_sampling='spacefill', 
+        model='m11', model_lib='MILES', imf='kr'): 
+    obscond = obs_condition(sampling=obs_sampling) 
+    if iobs >= obscond.shape[0]: raise ValueError
+    
+    # read in source spectra and meta data 
+    specin = lgal_sourceSpectra(galid, lib=lib)
+    zred = specin['meta']['REDSHIFT'] 
+    
+    # read firefly file 
+    f_specin = f_Source(galid, lib=lib)
+    if not dust: 
+        f_firefly = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
+            'myFirefly.', model, '.', model_lib, '.imf_', imf, '.nodust__', 
+            f_specin.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.nodust.hdf5']) 
+    
+    fh = h5py.File(f_firefly, 'r')  
+    ff_fit = {} 
+    for k in fh.keys(): 
+        ff_fit[k] = fh[k].value 
+    ff_prop = {} 
+    for k in fh.attrs.keys(): 
+        ff_prop[k] = fh.attrs[k] 
+    
+    # spectra comparison
+    fig = plt.figure(figsize=(15,5))
+    sub = fig.add_subplot(111)
+    if not dust: 
+        sub.plot(specin['wave'], specin['flux_nodust_nonoise'], c='C0', lw=1, label='Source')
+    sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux_model'], c='C1', label='FIREFLY best-fit')
+    sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux'] - ff_fit['flux_model'], c='r', label='residual') 
+    sub.legend(loc='upper right', fontsize=20)
+    sub.set_xlabel('Wavelength [$\AA$]', fontsize=25)
+    sub.set_xlim([3.3e3, 9.8e3])
+    sub.set_ylabel('flux [$10^{-17} erg/s/cm^2/\AA$]', fontsize=25)
+    sub.set_ylim([0., 1.5*specin['flux_nodust_nonoise'][(specin['wave'] > 3e3) & (specin['wave'] < 1e4)].max()])
+    fig.savefig(''.join([f_firefly.rsplit('/', 1)[0], '/', 
+        '_spectra.', f_firefly.rsplit('/', 1)[1].rsplit('.', 1)[0], '.png']), bbox_inches='tight') 
+    
+    # compare inferred properties to input properties
+    gal_input = LGalInput(galid) 
+    print('input: total_mass = %f' % np.sum(gal_input['sfh_disk'] + gal_input['sfh_bulge'])) 
+    print('firefly: total mass = %f' % ff_prop['logM_total']) 
+    ssp_age, ssp_z, ssp_mtot = [], [], [] 
+    for i in range(ff_prop['n_ssp']): 
+        print('--- SSP %i; weight=%f ---' % (i, ff_prop['weightLight_ssp_'+str(i)]))
+        print('age = %f'% ff_prop['age_ssp_'+str(i)])
+        print('log Z = %f'% ff_prop['logZ_ssp_'+str(i)])
+        print('log M_tot = %f' % ff_prop['logM_total_ssp_'+str(i)])
+        ssp_age.append(ff_prop['age_ssp_'+str(i)]) 
+        ssp_z.append(10**ff_prop['logZ_ssp_'+str(i)]) 
+        ssp_mtot.append(10**ff_prop['logM_total_ssp_'+str(i)]) 
+
+    fig = plt.figure(figsize=(12,4))
+    sub = fig.add_subplot(121)
+    sub.plot(gal_input['sfh_t'], gal_input['sfh_disk'], color='C0', label='disk')
+    sub.plot(gal_input['sfh_t'], gal_input['sfh_bulge'], color='red', label='bulge')
+    sub.plot(gal_input['sfh_t'], gal_input['sfh_bulge'] + gal_input['sfh_disk'], color='black', label='total')
+    sub.plot(ssp_age, ssp_mtot)
+    print ssp_age
+    print np.log10(ssp_mtot)
+    sub.set_xlabel('Lookback time (Gyr)', fontsize=25)
+    sub.set_xlim([1e-2, 13.])
+    sub.set_ylabel(r'Mass formed (M$_\odot$)', fontsize=25)
+    sub.set_yscale('log')
+    sub.set_ylim([1e7, 5e10])
+    
+    sub = fig.add_subplot(122)
+    sub.plot(gal_input['sfh_t'], gal_input['Z_disk'], label='disk')
+    sub.plot(gal_input['sfh_t'], gal_input['Z_bulge'], color='red', label='bulge')
+    sub.plot([0., 0.], [0., 0.], c='k', ls='-', label='total')
+    sub.plot(ssp_age, ssp_z)
+    sub.legend(fontsize=15, ncol=2)
+    sub.set_xlabel('Lookback time (Gyr)', fontsize=25)
+    sub.set_xlim([1e-2, 13.])
+    sub.set_ylabel('Metallicity', fontsize=25)
+    sub.set_yscale('log') 
+    sub.set_ylim([0., 0.1])
+    fig.savefig(''.join([f_firefly.rsplit('/', 1)[0], '/', 
+        '_mstar.', f_firefly.rsplit('/', 1)[1].rsplit('.', 1)[0], '.png']), bbox_inches='tight') 
+    return None
 
 ####################################################
 # firefly fitting
@@ -853,9 +975,12 @@ if __name__=="__main__":
     #obs_SkyBrightness(sampling='spacefill', overwrite=True)
     galids = testGalIDs()
     for iobs in [0]: #range(1,8): 
-        for ii, galid in enumerate(galids): 
+        for ii, galid in enumerate(galids[:1]): 
             print('--- %i ---' % ii) 
             #lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill')
+            myFirefly_lgal_sourceSpec(galid, dust=False, lib='bc03')
+            myFirefly_lgal_sourceSpec_validate(galid, dust=False, lib='bc03')
+            #firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
             #firefly_lgal_sourceSpec(galid, dust=False, lib='bc03', hpf_mode='on')
             #firefly_lgal_sourceSpec_validate(galid, dust=False, lib='bc03', hpf_mode='on')
             #firefly_lgal_sourceSpec(galid, dust=True, lib='bc03', hpf_mode='on')
@@ -865,7 +990,7 @@ if __name__=="__main__":
             #prospector_lgal_bgsSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=True, infer_method='emcee')
             #prospector_lgal_bgsSpec_validate(galid, iobs, lib='bc03', obs_sampling='spacefill', mask=True, infer_method='emcee')
             pass
-    firefly_Mstar() 
+    #firefly_Mstar() 
     #plot_obs_condition() 
     #plot_obs_SkyBrightness()
     #plot_lgal_bgsSpec()
