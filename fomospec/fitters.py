@@ -684,13 +684,13 @@ class myFirefly(object):
             ff_prop['ebv'] = best_ebv
 
         if f_output is not None:  
-            if not silent: print('write to %s' % self.f_output) 
-            f = h5py.File(self.f_output, 'w') 
+            if not silent: print('write to %s' % f_output) 
+            f = h5py.File(f_output, 'w') 
             for k in ff_fit.keys():
                 f.create_dataset(k, data=ff_fit[k]) 
 
             for k in ff_prop.keys(): 
-                f.attr[k] = ff_prop[k] 
+                f.attrs[k] = ff_prop[k] 
             
         return ff_fit, ff_prop
 
@@ -760,7 +760,7 @@ class myFirefly(object):
             matched_wave = w_m[1:-1]
             matched_model = flux_m[:,1:-1]
             matched_data = np.interp(matched_wave, w_d, flux_d) # piecewise linear interpolation 
-            matched_error = np.interp(matched_wave, w_d, err_d_d)
+            matched_error = np.interp(matched_wave, w_d, err_d)
         '''
             if np.sum(mask_m) >= np.sum(mask): # model has higher wavelength resolution
                 if not silent: print("model has higher wavelength resolution")
