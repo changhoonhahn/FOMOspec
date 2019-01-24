@@ -515,7 +515,7 @@ class myFirefly(object):
 
         return wavelength, np.array(flux_model), np.array(age_model), np.array(metal_model)
 
-    def Fit(self, wave, flux, err, zred, mask=None, vdisp=None, r_instrument=None, ebv_mw=None, f_output=None, silent=True):
+    def Fit(self, wave, flux, err, zred, mask=None, vdisp=None, r_instrument=None, ebv_mw=None, flux_unit=1e-17, f_output=None, silent=True):
         ''' Once the data and models are loaded, then execute this function to 
         find the best model. It loops overs the models to be fitted on the data:
         #. gets the models
@@ -586,7 +586,7 @@ class myFirefly(object):
         if not silent: print("chis into probabilities")
         self.dof = len(wave_match)
         probs = convert_chis_to_probs(chis, self.dof)
-        self.d_lum = self.cosmo.luminosity_distance(zred).to(U.cm)
+        self.d_lum = self.cosmo.luminosity_distance(zred).to(U.cm).value
                         
         if not silent: print("Calculating average properties and outputting")
         averages = calculate_averages_pdf(probs, 
@@ -597,7 +597,7 @@ class myFirefly(object):
                 model_metal, 
                 self.pdf_sampling, 
                 self.d_lum, 
-                1e-17)
+                flux_unit)
         
         unique_ages = np.unique(model_age)
         marginalised_age_weights = np.zeros(unique_ages.shape)
@@ -610,13 +610,12 @@ class myFirefly(object):
 
         bf_mass = (mass_weights[best_fit_index] > 0)[0]
         bf_light = (light_weights[best_fit_index] > 0)[0]
-        mass_per_ssp = unnorm_mass[best_fit_index[0]][bf_mass] * 1e-17 * 4 * np.pi * self.d_lum**2.0 
+        mass_per_ssp = unnorm_mass[best_fit_index[0]][bf_mass] * flux_unit * 4 * np.pi * self.d_lum**2 
         age_per_ssp = model_age[bf_mass]
         metal_per_ssp = model_metal[bf_mass]
         weight_mass_per_ssp = mass_weights[best_fit_index[0]][bf_mass]
         weight_light_per_ssp = light_weights[best_fit_index[0]][bf_light]
         order = np.argsort(-weight_light_per_ssp)
-
         final_ML_totM, final_ML_alive, final_ML_wd, final_ML_ns, final_ML_bh, final_ML_turnoff, final_gas_fraction = self._get_massloss_factors(self.imf, mass_per_ssp, age_per_ssp, metal_per_ssp)
 
         # Calculate the total mass loss from all the SSP contributions.
