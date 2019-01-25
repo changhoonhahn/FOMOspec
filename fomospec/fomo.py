@@ -9,6 +9,8 @@ import fsps
 import numpy as np 
 from astropy import units as U 
 from astropy.cosmology import Planck13
+# -- fomospec -- 
+from . import util as UT 
 
 
 def FSPS_nodust(tage, sfh, zh, imf='chabrier'):

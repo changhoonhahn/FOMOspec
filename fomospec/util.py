@@ -7,6 +7,7 @@ import os
 import h5py
 import numpy as np
 import astropy.units as U 
+from astropy.io import fits 
 import astropy.constants as Const
 from astropy.cosmology import FlatLambdaCDM
 
@@ -32,6 +33,25 @@ def readProspector(f_pros):
     lnp = ef['sampling']['lnprobability'].value
     ef.close()
     return chain,lnp 
+
+
+def readDESIspec(ffits): 
+    ''' read DESI spectra fits file
+
+    :params ffits: 
+        name of fits file  
+    
+    :returns spec:
+        dictionary of spectra
+    '''
+    fitobj = fits.open(ffits)
+    
+    spec = {} 
+    for i_k, k in enumerate(['wave', 'flux', 'ivar']): 
+        spec[k+'_b'] = fitobj[2+i_k].data
+        spec[k+'_r'] = fitobj[7+i_k].data
+        spec[k+'_z'] = fitobj[12+i_k].data
+    return spec 
 
 
 def check_env(): 
