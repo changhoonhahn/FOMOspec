@@ -81,36 +81,27 @@ def mFF_LGal_nodust_Mstar(imf='chabrier', iobs=0, obs_sampling='spacefill'):
     sub.set_ylim([1e8, 1e12])
     sub.legend(loc='upper left', markerscale=5, handletextpad=0, fontsize=20) 
     fig.savefig(''.join([UT.fig_dir(), 'mFF_LGal_nodust_Mstar.obs', str(iobs), '.png']), bbox_inches='tight') 
-    #fig = plt.figure(figsize=(7,7))
-    #sub = fig.add_subplot(111)
-    #sub.hist(np.log10(mtot_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
-    #sub.hist(np.log10(mstar_ffly_source), range=(9,12), bins=20, histtype='step', 
-    #        color='k', linewidth=1, linestyle=':', label='source')
-    #sub.hist(np.log10(mstar_ffly_source_nodust), range=(9,12), bins=20, histtype='step', 
-    #        color='r', linewidth=1, linestyle=':', label='source (no dust)')
-    #for iobs in obs: 
-    #    sub.hist(np.log10(mstar_ffly_obs[iobs]), range=(9,12), bins=20, histtype='step', 
-    #            color='C'+str(iobs), linewidth=1, label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
-    #sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
-    #sub.set_xlim([9, 12])
-    #sub.legend(loc='upper right', frameon=True, fontsize=20) 
-    #fig.savefig(''.join([UT.fig_dir(), 
-    #    'mstar_hist.', f_firefly.rsplit('/', 1)[1].rsplit('__', 1)[0], '.png']), bbox_inches='tight') 
 
+    fig = plt.figure(figsize=(7,7))
+    sub = fig.add_subplot(111)
+    sub.hist(np.log10(m_source), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+    sub.hist(np.log10(minf_source), range=(9,12), bins=20, histtype='step', 
+            color='k', linewidth=1, linestyle=':', label='Firefly (noiseless)')
+    sub.hist(np.log10(minf_bgs), range=(9,12), bins=20, histtype='step', 
+            color='r', linewidth=1, linestyle=':', label='Firefly (bgs)')
+    sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
+    sub.set_xlim([9, 12])
+    sub.legend(loc='upper right', frameon=True, fontsize=20) 
+    fig.savefig(''.join([UT.fig_dir(), 'mFF_LGal_nodust_Mstar_hist.obs', str(iobs), '.png']), bbox_inches='tight') 
 
-
-    #fig = plt.figure(figsize=(7,7))
-    #sub = fig.add_subplot(111)
-    #sub.hist(np.log10(mtot_input) - np.log10(mstar_ffly_source), range=(-1,5), bins=20, color='k', histtype='stepfilled', alpha=0.5, label='source')
-    #sub.hist(np.log10(mtot_input) - np.log10(mstar_ffly_source_nodust), range=(-1,5), bins=20, color='r', histtype='stepfilled', alpha=0.5, label='source (no dust)')
-    #for iobs in obs: 
-    #    sub.hist(np.log10(mtot_input) - np.log10(mstar_ffly_obs[iobs]), range=(-1,5), bins=20, histtype='stepfilled', alpha=0.5,
-    #            color='C'+str(iobs), label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
-    #sub.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(firefly)}\,)$ ', fontsize=25) 
-    #sub.set_xlim([-1, 5])
-    #sub.legend(loc='upper right', fontsize=20) 
-    #fig.savefig(''.join([UT.fig_dir(), 
-    #    'dmstar_hist.', f_firefly.rsplit('/', 1)[1].rsplit('__', 1)[0], '.png']), bbox_inches='tight') 
+    fig = plt.figure(figsize=(7,7))
+    sub = fig.add_subplot(111)
+    sub.hist(np.log10(m_source) - np.log10(minf_source), range=(-1.5,1.5), bins=20, color='k', histtype='stepfilled', alpha=0.5, label='noiseless')
+    sub.hist(np.log10(m_source) - np.log10(minf_bgs), range=(-1.5,1.5), bins=20, color='r', histtype='stepfilled', alpha=0.5, label='bgs')
+    sub.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(firefly)}\,)$ ', fontsize=25) 
+    sub.set_xlim([-1.5, 1.5])
+    sub.legend(loc='upper right', fontsize=20) 
+    fig.savefig(''.join([UT.fig_dir(), 'mFF_LGal_nodust_dMstar_hist.obs', str(iobs), '.png']), bbox_inches='tight') 
     return None 
 
 
