@@ -51,7 +51,6 @@ def LGal_FSPS_nodust(galid, imf='chabrier', validate=False):
     :params validate: (default: False)
         if true generate plots that validate the spectra
     '''
-    from feasibgs import forwardmodel as FM 
     # get Lgal galaxy SF and Z histories 
     f_input = ''.join([UT.dat_dir(), 'Lgal/gal_inputs/', 'gal_input_', str(galid), '_BGS_template_FSPS_uvmiles.csv'])
     lgal = np.loadtxt(f_input, skiprows=1, unpack=True, delimiter=' ')
@@ -152,12 +151,13 @@ def LGal_FSPS_nodust(galid, imf='chabrier', validate=False):
 def BGSspectra_LGal_FSPS_nodust(galid, iobs=0, imf='chabrier', obs_sampling='spacefill', validate=False): 
     '''
     '''
+    from feasibgs import forwardmodel as FM 
     # read in galaxy source spectrum and metadata
     f_source = ''.join([UT.dat_dir(), 'spectral_challenge/bgs/', 
         'LGAL.', str(galid), '.FSPS.nodust.imf_', imf, '.hdf5']) 
-    fh5 = h5py.File(f_source, 'w') 
+    fh5 = h5py.File(f_source, 'r') 
     wave = fh5['wavelength'].value 
-    flux = fh5['flux_total'].value 
+    flux_total = fh5['flux'].value 
     flux_disk = fh5['flux_disk'].value
     flux_bulge = fh5['flux_bulge'].value
     zred = fh5.attrs['zred']
@@ -552,9 +552,9 @@ def obs_SkyBrightness(sampling='spacefill', overwrite=False):
 
 if __name__=='__main__': 
     galids = testGalIDs() 
-    for gid in galids[5:]: 
-        #LGal_FSPS_nodust(gid, imf='chabrier', validate=False)
-        #mFF_spectra_LGal_FSPS_nodust(gid, imf='chabrier')
+    for gid in np.unique(galids): 
+        LGal_FSPS_nodust(gid, imf='chabrier', validate=False)
+        mFF_spectra_LGal_FSPS_nodust(gid, imf='chabrier')
         for iobs in [0]: # for different observing conditions 
             BGSspectra_LGal_FSPS_nodust(gid, iobs=iobs, imf='chabrier', obs_sampling='spacefill', validate=True)
             mFF_BGSspectra_LGal_FSPS_nodust(gid, iobs, imf='chabrier', obs_sampling='spacefill')

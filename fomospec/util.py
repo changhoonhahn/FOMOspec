@@ -12,6 +12,19 @@ import astropy.constants as Const
 from astropy.cosmology import FlatLambdaCDM
 
 
+def readmyFirefly(f_ffly): 
+    '''
+    '''
+    f = h5py.File(f_ffly, 'r') 
+    output = {} 
+    for k in f.keys(): 
+        output[k] = f[k].value 
+    props = {} 
+    for k in f.attrs.keys(): 
+        props[k] = f.attrs[k]
+    return output, props
+
+
 def readFirefly(f_ffly): 
     ''' Read in firefly fitting output file
     '''
