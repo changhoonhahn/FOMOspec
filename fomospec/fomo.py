@@ -48,11 +48,10 @@ def FSPS_nodust(tage, sfh, zh, imf='chabrier'):
             imf_type=i_imf[imf])    # default is chabrier 
 
     for i, t, m, z in zip(range(len(tage)), tage, sfh, zh): 
-        ssp.params['logzsol'] = np.log10(z) # log(Z) 
+        ssp.params['logzsol'] = np.log10(z/0.0190) # log(Z/Zsun) 
         wave_rest, lum_i = ssp.get_spectrum(tage=t, peraa=True) # in units of Lsun/AA
 
-        if i == 0: 
-            lum_ssp = np.zeros((len(tage), len(wave_rest)))
+        if i == 0: lum_ssp = np.zeros((len(tage), len(wave_rest)))
         if m > 0.: 
             lum_ssp[i,:] = m * lum_i # Mformed * SSP 
     return wave_rest, lum_ssp 
