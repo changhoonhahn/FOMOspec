@@ -652,7 +652,7 @@ class myFirefly(object):
                 ff_prop['age_'+w+'W_up_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_plus']
                 ff_prop['age_'+w+'W_low_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_minus']
                 ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_plus'])
-                ff_prop['logZ_'+w+'W_lwo_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_minus'])
+                ff_prop['logZ_'+w+'W_low_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_minus'])
 
         # total stellar mass 
         ff_prop['logM_total'] = np.log10(averages['stellar_mass'])
