@@ -83,5 +83,5 @@ def zSpectrum(w_rest, lum_ssp, zred, cosmo=Planck13):
     d_lum = cosmo.luminosity_distance(zred).to(U.cm).value # luminosity distance in cm
 
     w_obs = w_rest * (1. + zred) # observed-frame wavelength 
-    flux = lum_ssp * UT.Lsun() / (4. * np.pi * d_lum**2) 
+    flux = lum_ssp * UT.Lsun() / (4. * np.pi * d_lum**2) / (1. + zred) 
     return w_obs, flux

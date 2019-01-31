@@ -585,7 +585,7 @@ class myFirefly(object):
         if not silent: print("mass weighted SSP contributions")
         # 5. Get mass-weighted SSP contributions using saved M/L ratio.
         unnorm_mass = light_weights * mass_factor
-        mass_weights = unnorm_mass / np.sum(unnorm_mass, axis=0) 
+        mass_weights = (unnorm_mass.T / np.sum(unnorm_mass, axis=1)).T
 
         if not silent: print("chis into probabilities")
         self.dof = len(wave_match)
@@ -608,17 +608,17 @@ class myFirefly(object):
         marginalised_age_weights_int = np.sum(mass_weights.T, 1)
         for i_a, age in enumerate(unique_ages):
             marginalised_age_weights[i_a] = np.sum(marginalised_age_weights_int[model_age == age])
+    
+        best_fit_index = np.argmin(chis)
+        best_fit = np.dot(light_weights[best_fit_index], model_flux)
 
-        best_fit_index = [np.argmin(chis)]
-        best_fit = np.dot(light_weights[best_fit_index], model_flux)[0]
-
-        bf_mass = (mass_weights[best_fit_index] > 0)[0]
-        bf_light = (light_weights[best_fit_index] > 0)[0]
-        mass_per_ssp = unnorm_mass[best_fit_index[0]][bf_mass] * flux_unit * 4 * np.pi * self.d_lum**2 
+        bf_mass = (mass_weights[best_fit_index] > 0)
+        bf_light = (light_weights[best_fit_index] > 0)
+        mass_per_ssp = unnorm_mass[best_fit_index][bf_mass] * flux_unit * 4 * np.pi * self.d_lum**2 
         age_per_ssp = model_age[bf_mass]
         metal_per_ssp = model_metal[bf_mass]
-        weight_mass_per_ssp = mass_weights[best_fit_index[0]][bf_mass]
-        weight_light_per_ssp = light_weights[best_fit_index[0]][bf_light]
+        weight_mass_per_ssp = mass_weights[best_fit_index][bf_mass]
+        weight_light_per_ssp = light_weights[best_fit_index][bf_light]
         order = np.argsort(-weight_light_per_ssp)
         final_ML_totM, final_ML_alive, final_ML_wd, final_ML_ns, final_ML_bh, final_ML_turnoff, final_gas_fraction = self._get_massloss_factors(self.imf, mass_per_ssp, age_per_ssp, metal_per_ssp)
 
@@ -650,9 +650,9 @@ class myFirefly(object):
             ff_prop['logZ_'+w+'W'] = np.log10(averages[w+'_metal'])
             for i_q in np.arange(1,4).astype(str): 
                 ff_prop['age_'+w+'W_up_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_plus']
-                ff_prop['age_'+w+'W_up_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_plus']
+                ff_prop['age_'+w+'W_low_'+i_q+'sig'] = averages[w+'_age_'+i_q+'_sig_minus']
                 ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_plus'])
-                ff_prop['logZ_'+w+'W_up_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_plus'])
+                ff_prop['logZ_'+w+'W_lwo_'+i_q+'sig'] = np.log10(averages[w+'_metal_'+i_q+'_sig_minus'])
 
         # total stellar mass 
         ff_prop['logM_total'] = np.log10(averages['stellar_mass'])
