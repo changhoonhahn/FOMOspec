@@ -553,6 +553,13 @@ class myFirefly(object):
                 mask=mask, 
                 silent=silent)
 
+            
+        if not silent: print("Normalize the models to the median data flux")
+        data_median = np.median(data_flux)
+        model_median = np.median(model_flux_raw, axis=1) 
+
+        mass_factor = data_median/model_median
+        model_flux = (model_flux_raw.T / model_median).T * data_median
         if self.dust_corr:
             if not silent: print("Dust correction")
             # determining attenuation curve through HPF fitting, 
@@ -568,13 +575,6 @@ class myFirefly(object):
             
             mass_factor = data_median/model_median
             model_flux = (model_flux_atten.T / model_median).T * data_median
-        else: 
-            if not silent: print("Normalize the models to the median data flux")
-            data_median = np.median(data_flux)
-            model_median = np.median(model_flux_raw, axis=1) 
-
-            mass_factor = data_median/model_median
-            model_flux = (model_flux_raw.T / model_median).T * data_median
 
         if not silent: print("Fit model to the data")
         # this is supposed to be the essential ingredient of firefly 
