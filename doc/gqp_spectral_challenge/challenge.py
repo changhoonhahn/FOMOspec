@@ -11,6 +11,7 @@ import scipy as sp
 # -- astropy -- 
 from astropy.io import fits 
 from astropy import units as u
+from astropy.cosmology import Planck13 
 # -- desi --
 from desispec.io import read_spectra
 # -- feasibgs -- 
@@ -18,6 +19,7 @@ from feasibgs import forwardmodel as FM
 # -- fomospec -- 
 from fomospec import util as UT 
 from fomospec import fomo as FOMO 
+from fomospec import fitters as Fitters
 # --- plotting --- 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -34,15 +36,231 @@ mpl.rcParams['ytick.major.width'] = 1.5
 mpl.rcParams['legend.frameon'] = False
 
 
-def mFF_LGal_nodust(imf='chabrier', iobs=0, obs_sampling='spacefill'): 
-    ''' Compares properties inferred from myFirefly to input Lgal properties. 
+################################################
+# firefly fits
+################################################
+def mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False): 
+    ''' fit noiseless spectra generated from Rita's forward model using firefly 
+
+    :param galid: 
+        galaxy id number
+
+    :param lib: (default: 'bc03') 
+        specify stellar population synthesis library. Options are
+        'bc03' and 'fsps'
+
+    :param dust: (default: False) 
+        spectra with or without dust. 
+
+    :param validate: (default: False)
+        if True, it will generate a plot 
+    '''
+    # read in SF+Z histories
+    ellgal = Lgal(galid)
+    # read source spectra 
+    source = Lgal_nonoiseSpectra(galid, lib=lib)
+    wave = source['wave'] 
+    if dust: flux = source['flux_dust_nonoise']
+    else: flux = source['flux_nodust_nonoise'] 
+    flux_err = flux * 0.01 # 1% noise 
+    zred = source['redshift'] 
+    
+    ffly = Fitters.myFirefly( # initialize firefly
+            Planck13, # comsology
+            model='m11', 
+            model_lib='MILES', 
+            imf='cha', 
+            dust_corr=dust,         # if spectra has dust then correct; else don't 
+            age_lim=[0., 13.],      # can't have older populations
+            logZ_lim=[-3.,1.])
+    mask = ffly.emissionlineMask(wave/(1.+zred))
+    # output file name 
+    f_non = f_nonoise(galid, lib=lib)
+    if dust: str_dust = 'dust'
+    else: str_dust = 'nodust'
+
+    f_mff = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs', 
+            ''.join(['mFF.', f_non.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.', str_dust, '.hdf5']))
+    
+    # run the fitting 
+    ff_fit, ff_prop = ffly.Fit(wave, flux, flux_err, zred, mask=mask, f_output=f_mff, flux_unit=1e-17)
+
+    print('input: total_mass = %f' % ellgal['logM_total'])  
+    print('firefly: total mass = %f' % ff_prop['logM_total']) 
+    _ssp_age, _ssp_z, _ssp_mtot = [], [], [] 
+    for i in range(ff_prop['n_ssp']): 
+        print('--- SSP %i; weight=%f ---' % (i, ff_prop['weightLight_ssp_'+str(i)]))
+        print('age = %f'% ff_prop['age_ssp_'+str(i)])
+        print('log Z = %f'% ff_prop['logZ_ssp_'+str(i)])
+        print('log M_tot = %f' % ff_prop['logM_total_ssp_'+str(i)])
+        _ssp_age.append(ff_prop['age_ssp_'+str(i)]) 
+        _ssp_z.append(10**ff_prop['logZ_ssp_'+str(i)]) 
+        _ssp_mtot.append(10**ff_prop['logM_total_ssp_'+str(i)]) 
+    agesort = np.argsort(_ssp_age)
+    ssp_age = np.array(_ssp_age)[agesort]
+    ssp_z = np.array(_ssp_z)[agesort]
+    ssp_mtot = np.array(_ssp_mtot)[agesort]
+
+    if validate: # validation plot 
+        fig = plt.figure(figsize=(12,10))
+        gs = mpl.gridspec.GridSpec(2,2, figure=fig) 
+        sub = plt.subplot(gs[0,:]) # flux plot
+        sub.plot(wave, flux, c='C0', lw=1, label='LGal BGS spectrum')
+        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux_model'], c='C1', label='FIREFLY best-fit')
+        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux'] - ff_fit['flux_model'], c='r', label='residual') 
+        sub.text(0.05, 0.95, ('$M_\mathrm{tot}=10^{%.2f}; M_\mathrm{firefly} = 10^{%.2f}$' % 
+            (ellgal['logM_total'], ff_prop['logM_total'])), ha='left', va='top', transform=sub.transAxes, fontsize=20)
+        sub.set_xlabel('observed-frame wavelength', fontsize=25)
+        sub.set_xlim([3e3, 1e4])
+        sub.set_ylabel('flux [$erg/s/cm^2/A$]', fontsize=25)
+        sub.legend(loc='upper right', fontsize=20)
+        
+        sub = plt.subplot(gs[1,0]) # SFH
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['sfh_disk'], c='C0', ls='--', label='Disk')
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'] + ellgal['sfh_disk'], c='C0', label='Total')
+        sub.plot(ssp_age, ssp_mtot, c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("$M_\mathrm{formed}$", fontsize=25)
+        sub.set_yscale("log")
+        sub.set_ylim([5e6, 5e10]) 
+        
+        sub = plt.subplot(gs[1,1]) # ZH
+        sub.plot(ellgal['tage'], ellgal['Z_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['Z_disk'], c='C0', ls='--', label='Disk')
+        sub.plot(ssp_age, ssp_z, c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("metallicity, $Z$", fontsize=25)
+        sub.set_yscale('log') 
+        sub.set_ylim([1e-3, 1e-1]) 
+        fig.subplots_adjust(wspace=0.25, hspace=0.25)
+        fig.savefig(''.join([f_mff.rsplit('.hdf5',1)[0], '.png']), bbox_inches='tight') 
+        plt.close() 
+    return None 
+
+
+def mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=False): 
+    ''' fit BGS spectra generated from Rita's forward model using firefly 
+
+    :param galid: 
+        galaxy id number
+
+    :param iobs: 
+        index of sampled observing conditions 
+
+    :param lib: (default: 'bc03') 
+        specify stellar population synthesis library. Options are
+        'bc03' and 'fsps'
+
+    :param obs_sampling: (default: 'spacefill') 
+        method for sampling the observation 
+
+    :param dust: (default: False) 
+        spectra with or without dust. 
+
+    :param validate: (default: False)
+        if True, it will generate a plot 
+
+    :return : 
+        dictionary with 
+    '''
+    # read in SF+Z histories
+    ellgal = Lgal(galid)
+    # read source spectra 
+    source = Lgal_nonoiseSpectra(galid, lib=lib)
+    zred = source['redshift'] 
+    
+    # read bgs spectra 
+    bgs = Lgal_BGSnoiseSpec(galid, iobs, lib=lib, obs_sampling=obs_sampling, dust=dust)
+    wave_bgs = np.concatenate([bgs['wave_'+b] for b in ['b', 'r', 'z']])      # observed frame
+    flux_bgs = np.concatenate([bgs['flux_'+b][0] for b in ['b', 'r', 'z']])   # 10-17 ergs/s/cm2/AA
+    flux_err_bgs = np.concatenate([bgs['ivar_'+b][0]**-0.5 for b in ['b', 'r', 'z']])
+    
+    wavesort = np.argsort(wave_bgs) # sort by wavelenght
+    wave_bgs = wave_bgs[wavesort]
+    flux_bgs = flux_bgs[wavesort]
+    flux_err_bgs = flux_err_bgs[wavesort]
+
+    ffly = Fitters.myFirefly( # initialize firefly
+            Planck13, # comsology
+            model='m11', 
+            model_lib='MILES', 
+            imf='cha', 
+            dust_corr=dust,         # if spectra has dust then correct; else don't 
+            age_lim=[0., 13.],      # can't have older populations
+            logZ_lim=[-3.,1.])
+    mask = ffly.emissionlineMask(wave_bgs/(1.+zred))
+    # output file name 
+    f_bgs = f_BGS(galid, iobs, lib=lib, obs_sampling=obs_sampling, dust=dust)
+    f_mff = ''.join([f_bgs.rsplit('/', 1)[0], '/mFF.', f_bgs.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.hdf5'])
+    
+    # run the fitting 
+    ff_fit, ff_prop = ffly.Fit(wave_bgs, flux_bgs, flux_err_bgs, zred, mask=mask, f_output=f_mff, flux_unit=1e-17)
+
+    print('input: total_mass = %f' % ellgal['logM_total'])  
+    print('firefly: total mass = %f' % ff_prop['logM_total']) 
+    _ssp_age, _ssp_z, _ssp_mtot = [], [], [] 
+    for i in range(ff_prop['n_ssp']): 
+        print('--- SSP %i; weight=%f ---' % (i, ff_prop['weightLight_ssp_'+str(i)]))
+        print('age = %f'% ff_prop['age_ssp_'+str(i)])
+        print('log Z = %f'% ff_prop['logZ_ssp_'+str(i)])
+        print('log M_tot = %f' % ff_prop['logM_total_ssp_'+str(i)])
+        _ssp_age.append(ff_prop['age_ssp_'+str(i)]) 
+        _ssp_z.append(10**ff_prop['logZ_ssp_'+str(i)]) 
+        _ssp_mtot.append(10**ff_prop['logM_total_ssp_'+str(i)]) 
+    agesort = np.argsort(_ssp_age)
+    ssp_age = np.array(_ssp_age)[agesort]
+    ssp_z = np.array(_ssp_z)[agesort]
+    ssp_mtot = np.array(_ssp_mtot)[agesort]
+
+    if validate: # validation plot 
+        fig = plt.figure(figsize=(12,10))
+        gs = mpl.gridspec.GridSpec(2,2, figure=fig) 
+        sub = plt.subplot(gs[0,:]) # flux plot
+        sub.plot(wave_bgs, flux_bgs, c='C0', lw=1, label='LGal BGS spectrum')
+        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux_model'], c='C1', label='FIREFLY best-fit')
+        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux'] - ff_fit['flux_model'], c='r', label='residual') 
+        sub.text(0.05, 0.95, ('$M_\mathrm{tot}=10^{%.2f}; M_\mathrm{firefly} = 10^{%.2f}$' % 
+            (ellgal['logM_total'], ff_prop['logM_total'])), ha='left', va='top', transform=sub.transAxes, fontsize=20)
+        sub.set_xlabel('observed-frame wavelength', fontsize=25)
+        sub.set_xlim([3e3, 1e4])
+        sub.set_ylabel('flux [$erg/s/cm^2/A$]', fontsize=25)
+        sub.legend(loc='upper right', fontsize=20)
+        
+        sub = plt.subplot(gs[1,0]) # SFH
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['sfh_disk'], c='C0', ls='--', label='Disk')
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'] + ellgal['sfh_disk'], c='C0', label='Total')
+        sub.plot(ssp_age, ssp_mtot, c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("$M_\mathrm{formed}$", fontsize=25)
+        sub.set_yscale("log")
+        sub.set_ylim([5e6, 5e10]) 
+        
+        sub = plt.subplot(gs[1,1]) # ZH
+        sub.plot(ellgal['tage'], ellgal['Z_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['Z_disk'], c='C0', ls='--', label='Disk')
+        sub.plot(ssp_age, ssp_z, c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("metallicity, $Z$", fontsize=25)
+        sub.set_yscale('log') 
+        sub.set_ylim([1e-3, 1e-1]) 
+        fig.subplots_adjust(wspace=0.25, hspace=0.25)
+        fig.savefig(''.join([f_mff.rsplit('.hdf5',1)[0], '.png']), bbox_inches='tight') 
+        plt.close() 
+    return None 
+
+
+def mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill'): 
+    ''' Compare properties inferred from myFirefly to input Lgal properties. 
     The properties we compare are Mformed, mass weighted age, and mass weighted
     metallicity. 
-
-    :param imf: (default: chabrier) 
-        imf used to generate spectra for Lgal 
     
-    :param iobs: (default: 0) 
+    :param iobs:
         index of BGS observing conditions sampled for the spectral challenge
 
     :param obs_sampling: (default: 'spacefill') 
@@ -167,6 +385,37 @@ def mFF_LGal_nodust(imf='chabrier', iobs=0, obs_sampling='spacefill'):
     fig.savefig(''.join([UT.fig_dir(), 'mFF_LGal_nodust_dMstar_hist.obs', str(iobs), '.png']), bbox_inches='tight') 
     return None 
 
+################################################
+# constructing spectra
+################################################
+def Lgal(galid): 
+    ''' SF and Z histories of Lgal galaxy `galid`
+    '''
+    f_input = os.path.join(UT.dat_dir(), 'Lgal', 'gal_inputs', 'gal_input_'+str(galid)+'_BGS_template_FSPS_uvmiles.csv')
+    lgal = np.loadtxt(f_input, skiprows=1, unpack=True, delimiter=' ')
+
+    t_lb        = lgal[0] # lookback time [Gyr] 
+    sfh_disk    = lgal[2] # M* formed in disk at t_lb 
+    Z_disk      = lgal[4] # Z of disk at t_lb
+    sfh_bulge   = lgal[3] # M* formed in bulge at t_lb
+    Z_bulge     = lgal[5]  # Z of bulge at t_lb 
+    
+    # calculate formed masses
+    logM_disk = np.log10(np.sum(sfh_disk))
+    logM_bulge = np.log10(np.sum(sfh_bulge))
+    logM_total = np.log10(np.sum(sfh_disk) + np.sum(sfh_bulge))
+    
+    out = {} 
+    out['logM_disk'] = logM_disk
+    out['logM_bulge'] = logM_bulge
+    out['logM_total'] = logM_total
+    out['tage'] = t_lb   # lookback time (age)
+    out['sfh_disk'] = sfh_disk 
+    out['sfh_bulge'] = sfh_bulge
+    out['Z_disk'] = Z_disk 
+    out['Z_bulge'] = Z_bulge
+    return out 
+
 
 def f_nonoise(galid, lib='bc03'): 
     ''' retrun noiseless spectra template file name 
@@ -269,7 +518,8 @@ def Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=Fa
     fbgs = f_BGS(galid, iobs, lib=lib, obs_sampling=obs_sampling, dust=dust)
 
     if os.path.isfile(fbgs) and not overwrite: 
-        bgs_spectra = read_spectra(fbgs) 
+        #bgs_spectra = read_spectra(fbgs) 
+        bgs_spectra = UT.readDESIspec(fbgs)
     else: 
         # read in source spectra 
         spec_source = Lgal_nonoiseSpectra(galid, lib=lib)
@@ -319,7 +569,9 @@ def Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=Fa
         fig.savefig(fbgs.rsplit('.fits', 1)[0]+'.png', bbox_inches='tight') 
     return bgs_spectra 
 
-
+################################################
+# Lgal and observing condition selections
+################################################
 def testGalIDs(): 
     ''' get gal IDs for test set of LGal SAM objects
     '''
@@ -545,7 +797,9 @@ if __name__=="__main__":
     galids = testGalIDs()
     for iobs in [0]: #range(1,8): 
         for ii, galid in enumerate(np.unique(galids)): 
-            Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, overwrite=True, validate=True)
-            Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, overwrite=True, validate=True)
-
-    #mFF_LGal_nodust(imf='chabrier', iobs=0, obs_sampling='spacefill')
+            #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, overwrite=True, validate=True)
+            #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, overwrite=True, validate=True)
+            mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
+            mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
+            mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=True)
+            mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, validate=True)
