@@ -1,6 +1,7 @@
 import os
 import h5py
 import time
+import fsps
 import warnings 
 import numpy as np 
 import pandas as pd
@@ -23,6 +24,102 @@ from . import util as UT
 
 
 dict_imfs = {'cha': 'Chabrier', 'ss': 'Salpeter', 'kr': 'Kroupa'}
+
+
+class iFSPS(object): 
+    ''' inference using FSPS 
+    '''
+    def __init__(self, model_name='vanilla', cosmo=cosmo): 
+        self.model_name = model_name
+        self.cosmo = cosmo # cosmology  
+        self.ssp = self._ssp_initiate() # initial ssp
+
+    def model(self, tt_arr, zred=None, outwave=None): 
+        ''' very simple wrapper for a fsps model with minimal overhead compared to 
+        prospector
+        '''
+        theta = self._theta(tt_arr) 
+        ntheta = len(theta['mass']) 
+        #mfrac = np.zeros_like(mass)
+
+        if self.model_name == 'vanilla': 
+            for i, t, z, d, tau in zip(range(ntheta), theta['tage'], theta['Z'], theta['dust2'], theta['tau']): 
+                self.ssp.params['logzsol']  = np.log10(z/0.0190) # log(z/zsun) 
+                self.ssp.params['dust2']    = d # dust2 parameter in fsps 
+                self.ssp.params['tau']      = tau # sfh parameter 
+                w, ssp_lum = self.ssp.get_spectrum(tage=theta['tage'], peraa=True) 
+
+                mfrac[i] = self.ssp.stellar_mass
+                if i == 0: ssp_lums = np.zeros((len(mass), len(w)))
+                ssp_lums[i,:] = ssp_lum
+        elif self.model_name == 'dustless_vanilla': 
+            for i, t, z, tau in zip(range(ntheta), theta['tage'], theta['Z'], theta['tau']): 
+                self.ssp.params['logzsol']  = np.log10(z/0.0190) # log(z/zsun) 
+                self.ssp.params['tau']      = tau # sfh parameter 
+                w, ssp_lum = self.ssp.get_spectrum(tage=theta['tage'], peraa=True) 
+
+                mfrac[i] = self.ssp.stellar_mass
+                if i == 0: ssp_lums = np.zeros((len(mass), len(w)))
+                ssp_lums[i,:] = ssp_lum
+        
+        # mass normalization
+        spectrum = np.dot(mass, ssp_lums) 
+        #mfrac_sum = np.dot(mass, mfrac) / msas 
+
+        # redshift the spectra
+        w_z = w * (1. + zred) 
+        d_lum = self.cosmo.luminosity_distance(zred).to(U.cm).value # luminosity distance in cm
+        flux_z = lum_ssp * UT.Lsun() / (4. * np.pi * d_lum**2) / (1. + zred) 
+
+        if outwave is None: 
+            outwave = w_z
+            outspec = flux_z
+        else: 
+            outspec = np.interp(outwave, w_z, flux_z, left=0, right=0)
+        return outwave, outspec 
+
+    def _ssp_initiate(self): 
+        ''' initialize sps (FSPS StellarPopulaiton object) 
+        '''
+        if self.model_name == 'vanilla': 
+            ssp = fsps.StellarPopulation(
+                    zcontinuous=1,          # interpolate metallicities
+                    sfh=4,                  # sfh type 
+                    dust_type=2,            # Calzetti et al. (2000) attenuation curve. 
+                    imf_type=1)             # chabrier 
+        elif self.model_name == 'dustless_vanilla': 
+            ssp = fsps.StellarPopulation(
+                    zcontinuous=1,          # interpolate metallicities
+                    sfh=4,                  # sfh type 
+                    imf_type=1)             # chabrier 
+        else: 
+            raise NotImplementedError
+        return ssp 
+    
+    def _theta(self, tt_arr): 
+        ''' Given some theta array return dictionary of parameter values. 
+        This is synchronized with self.model_name
+        '''
+        theta = {} 
+        tt_arr = np.atleast_2d(tt_arr) 
+        print tt_arr
+        if self.model_name == 'vanilla': 
+            # tt_arr columns: mass, Z, tage, dust2, tau
+            theta['mass']   = tt_arr[:,0]
+            theta['Z']      = tt_arr[:,1]
+            theta['tage']   = tt_arr[:,2]
+            theta['dust2']  = tt_arr[:,3]
+            theta['tau']    = tt_arr[:,4]
+        elif self.model_name == 'dustless_vanilla': 
+            # tt_arr columns: mass, Z, tage, tau
+            theta['mass']   = tt_arr[:,0]
+            theta['Z']      = tt_arr[:,1]
+            theta['tage']   = tt_arr[:,2]
+            theta['tau']    = tt_arr[:,4]
+        else: 
+            raise NotImplementedError
+        return theta
+
 
 class Prospector(object): 
     ''' class object for spectral fitting using prospector
@@ -72,12 +169,6 @@ class Prospector(object):
         if add_burst: 
             pass
             # continue implementing 
-            # continue implementing 
-            # continue implementing 
-            # continue implementing 
-            # continue implementing 
-            # continue implementing 
-
 
         # Add dust emission parameters (fixed)
         model_params.update(TemplateLibrary["dust_emission"])
@@ -237,9 +328,9 @@ class Prospector(object):
         obs = {} 
         obs['wavelength'] = lam 
         obs['spectrum'] = flux 
-        if not mask:
+        if not mask: 
             obs['mask'] = np.ones(len(lam)).astype(bool)
-        else: 
+        if mask: # apply mask for emission lines
             w_lines = np.array([3728., 4861., 5007., 6564.]) * (1. + zred) 
             
             lines_mask = np.ones(len(lam)).astype(bool) 
@@ -247,10 +338,8 @@ class Prospector(object):
                 inemline = ((lam > wl - N_angstrom_masked) & (lam < wl + N_angstrom_masked))
                 lines_mask = (lines_mask & ~inemline)
             obs['mask'] = lines_mask 
-        if flux_noise is not None: 
-            obs['unc'] = flux_noise 
-        else: 
-            obs['unc'] = np.ones(len(lam))
+        if flux_noise is not None: obs['unc'] = flux_noise 
+        else: obs['unc'] = np.ones(len(lam))
 
         def lnPost(tt): 
             # Calculate prior probability and return -inf if not within prior

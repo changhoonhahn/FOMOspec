@@ -35,6 +35,87 @@ mpl.rcParams['ytick.major.size'] = 5
 mpl.rcParams['ytick.major.width'] = 1.5
 mpl.rcParams['legend.frameon'] = False
 
+################################################
+# prospector fits
+################################################
+def Prosp_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False): 
+    ''' fit noiseless spectra generated from Rita's forward model using Prospector 
+
+    :param galid: 
+        galaxy id number
+
+    :param lib: (default: 'bc03') 
+        specify stellar population synthesis library. Options are
+        'bc03' and 'fsps'
+
+    :param dust: (default: False) 
+        spectra with or without dust. 
+
+    :param validate: (default: False)
+        if True, it will generate a plot 
+    '''
+    # read in SF+Z histories
+    ellgal = Lgal(galid)
+    # read source spectra 
+    source = Lgal_nonoiseSpectra(galid, lib=lib)
+    wave = source['wave'] 
+    if dust: flux = source['flux_dust_nonoise']
+    else: flux = source['flux_nodust_nonoise'] 
+    flux_err = flux * 0.01 # 1% noise 
+    zred = source['redshift'] 
+
+
+    # output file name 
+    f_non = f_nonoise(galid, lib=lib)
+    if dust: str_dust = 'dust'
+    else: str_dust = 'nodust'
+    f_prosp = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs', 
+            ''.join(['Prosp.', f_non.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.', str_dust, '.hdf5']))
+    
+    # run prospector
+    prosp = Fitters.Prospector()
+    prosp.emcee_spec(wave, flux, None, zred, mask=mask, 
+            write=True, output_file=f_prosp, silent=False)
+    
+    if validate: # validation plot 
+        fig = plt.figure(figsize=(12,10))
+        gs = mpl.gridspec.GridSpec(2,2, figure=fig) 
+        sub = plt.subplot(gs[0,:]) # flux plot
+        sub.plot(wave, flux, c='C0', lw=1, label='LGal BGS spectrum')
+        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux_model'], c='C1', label='FIREFLY best-fit')
+        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux'] - ff_fit['flux_model'], c='r', label='residual') 
+        sub.text(0.05, 0.95, ('$M_\mathrm{tot}=10^{%.2f}; M_\mathrm{firefly} = 10^{%.2f}$' % 
+            (ellgal['logM_total'], ff_prop['logM_total'])), ha='left', va='top', transform=sub.transAxes, fontsize=20)
+        sub.set_xlabel('observed-frame wavelength', fontsize=25)
+        sub.set_xlim([3e3, 1e4])
+        sub.set_ylabel('flux [$erg/s/cm^2/A$]', fontsize=25)
+        sub.legend(loc='upper right', fontsize=20)
+        
+        sub = plt.subplot(gs[1,0]) # SFH
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['sfh_disk'], c='C0', ls='--', label='Disk')
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'] + ellgal['sfh_disk'], c='C0', label='Total')
+        sub.plot(ssp_age, ssp_mtot, c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("$M_\mathrm{formed}$", fontsize=25)
+        sub.set_yscale("log")
+        sub.set_ylim([5e6, 5e10]) 
+        
+        sub = plt.subplot(gs[1,1]) # ZH
+        sub.plot(ellgal['tage'], ellgal['Z_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['Z_disk'], c='C0', ls='--', label='Disk')
+        sub.plot(ssp_age, ssp_z, c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("metallicity, $Z$", fontsize=25)
+        sub.set_yscale('log') 
+        sub.set_ylim([1e-3, 1e-1]) 
+        fig.subplots_adjust(wspace=0.25, hspace=0.25)
+        fig.savefig(''.join([f_mff.rsplit('.hdf5',1)[0], '.png']), bbox_inches='tight') 
+        plt.close() 
+    return None 
+
 
 ################################################
 # firefly fits
@@ -285,6 +366,9 @@ def mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
     mform_inf_non, age_inf_non, z_inf_non= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # no noise
     mform_inf_bgs, age_inf_bgs, z_inf_bgs= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # bgs noise
 
+    # histogram of the comparison
+    fig = plt.figure(figsize=(20,6))
+
     for i, galid in enumerate(galids): 
         # read in input M_total 
         lgal = Lgal(galid)
@@ -320,63 +404,16 @@ def mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
         z_inf_bgs[i,0] = 10**ffly_prop['logZ_massW_up_1sig'] * 0.0190
         z_inf_bgs[i,2] = 10**ffly_prop['logZ_massW_low_1sig'] * 0.0190
 
-    fig = plt.figure(figsize=(20,6))
-    # scatter plot of log Mtotal (inferred) vs log Mtotal (input)
-    sub = fig.add_subplot(131)
-    sub.errorbar(mform_input, mform_inf_non[:,1], 
-            yerr=[mform_inf_non[:,1]-mform_inf_non[:,0], mform_inf_non[:,2]-mform_inf_non[:,1]], 
-            fmt='.k', markersize=10, elinewidth=2, label='source (no noise)')
-    sub.errorbar(mform_input, mform_inf_bgs[:,1], 
-            yerr=[mform_inf_bgs[:,1]-mform_inf_bgs[:,0], mform_inf_bgs[:,2]-mform_inf_bgs[:,1]], 
-            fmt='.C1', markersize=5, elinewidth=1, label=r'bgs; $i_\mathrm{obs}='+str(iobs+1)+'$')
-    sub.plot([1e8, 1e12], [1e8,1e12], c='k', ls='--')
-    sub.set_xlabel(r'$M_\mathrm{total}^\mathrm{(input)}$ [$M_\odot$]', fontsize=25) 
-    sub.set_xscale('log')
-    sub.set_xlim([1e9, 1e12])
-    sub.set_ylabel(r'$M_\mathrm{total}^\mathrm{(firefly)}$ [$M_\odot$]', fontsize=25) 
-    sub.set_yscale('log')
-    sub.set_ylim([1e9, 1e12])
-    sub.legend(loc='upper left', markerscale=5, handletextpad=0, fontsize=20) 
-
-    # scatter plot of mass weighted age (inferred) vs (input)
-    sub = fig.add_subplot(132)
-    sub.errorbar(age_input, age_inf_non[:,1], yerr=[age_inf_non[:,1]-age_inf_non[:,0], age_inf_non[:,2]-age_inf_non[:,1]], 
-            fmt='.k', markersize=10, elinewidth=2)
-    sub.errorbar(age_input, age_inf_bgs[:,1], yerr=[age_inf_bgs[:,1]-age_inf_bgs[:,0], age_inf_bgs[:,2]-age_inf_bgs[:,1]], 
-            fmt='.C1', markersize=5, elinewidth=1)
-    sub.plot([0.,15.], [0.,15.], c='k', ls='--')
-    sub.set_xlabel(r'mass weighted input age [Gyr]', fontsize=25) 
-    sub.set_xlim([0., 12])
-    sub.set_ylabel(r'mass weighted firefly age [Gyr]', fontsize=25) 
-    sub.set_ylim([0., 12])
-    
-    # scatter plot of mass weighted Z (inferred) vs (input)
-    sub = fig.add_subplot(133)
-    sub.errorbar(z_input, z_inf_non[:,1], yerr=[z_inf_non[:,1]-z_inf_non[:,0], z_inf_non[:,2]-z_inf_non[:,1]], 
-            fmt='.k', markersize=10, elinewidth=2)
-    sub.errorbar(z_input, z_inf_bgs[:,1], yerr=[z_inf_bgs[:,1]-z_inf_bgs[:,0], z_inf_bgs[:,2]-z_inf_bgs[:,1]], 
-            fmt='.C1', markersize=5, elinewidth=1)
-    sub.plot([0.,1.], [0.,1.], c='k', ls='--')
-    sub.set_xlabel(r'mass weighted input Z', fontsize=25) 
-    sub.set_xscale('log')
-    sub.set_xlim([1e-3, 1e-1])
-    sub.set_ylabel(r'mass weighted firefly Z', fontsize=25) 
-    sub.set_yscale('log')
-    sub.set_ylim([1e-3, 1e-1])
-    fig.subplots_adjust(wspace=0.25)
-    fig.savefig(os.path.join(UT.fig_dir(), 'mFF_LGal_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
-    
-    # histogram of the comparison
-    fig = plt.figure(figsize=(20,6))
-    sub = fig.add_subplot(131)
-    sub.hist(np.log10(mform_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
-    sub.hist(np.log10(mform_inf_non[:,1]), range=(9,12), bins=20, histtype='step', 
-            color='k', linewidth=1, linestyle=':', label='Firefly (noiseless)')
-    sub.hist(np.log10(mform_inf_bgs[:,1]), range=(9,12), bins=20, histtype='step', 
-            color='C1', linewidth=1, linestyle=':', label='Firefly (bgs)')
-    sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
-    sub.set_xlim([9, 12])
-    sub.legend(loc='upper right', frameon=True, fontsize=20) 
+        sub = fig.add_subplot(131)
+        if i == 0: 
+            sub.hist(np.log10(mform_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+            sub.hist(np.log10(mform_inf_non[:,1]), range=(9,12), bins=20, histtype='step', 
+                    color='k', linewidth=1, linestyle=':', label='Firefly (noiseless)')
+        sub.hist(np.log10(mform_inf_bgs[:,1]), range=(9,12), bins=20, histtype='step', 
+                color='C1', linewidth=1, linestyle=':', label='Firefly (bgs)')
+        sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
+        sub.set_xlim([9, 12])
+        sub.legend(loc='upper right', frameon=True, fontsize=20) 
     
     sub = fig.add_subplot(132)
     sub.hist(age_input, range=(0,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
@@ -419,6 +456,133 @@ def mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
     sub.set_xlabel(r'mass weighted $\log Z^\mathrm{(input)} - \log Z^\mathrm{(firefly)}$', fontsize=15) 
     sub.set_xlim([-2., 2.])
     fig.savefig(os.path.join(UT.fig_dir(), 'mFF_LGal_delta_hist_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
+    plt.close() 
+    return None 
+
+
+def mFF_comparison_iobs(lib='bc03', obs_sampling='spacefill', dust=True): 
+    ''' Compare properties inferred from myFirefly to input Lgal properties. 
+    The properties we compare are Mformed, mass weighted age, and mass weighted
+    metallicity. 
+    
+    :param obs_sampling: (default: 'spacefill') 
+        sampling method for the observing conditions. 
+    '''
+    if dust: str_dust = 'dust'
+    else: str_dust = 'nodust'
+    direc = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs')
+    if lib == 'bc03': 
+        # no noise spectrum firefly file 
+        mff_non = lambda gid: os.path.join(direc, 
+                ('mFF.gal_spectrum_%i_BGS_template_BC03_Stelib.%s.hdf5' % (gid, str_dust)))
+        # bgs-like spectrum firefly file 
+        mff_bgs = lambda gid, iobs: os.path.join(direc, 
+                ('mFF.BGSsim.gal_spectrum_%i_BGS_template_BC03_Stelib.%s.obscond_%s.obs%i.hdf5' % (gid, str_dust, obs_sampling, iobs+1)))
+    else: 
+        raise ValueError
+
+    # gather inferred and input properties
+    galids = np.unique(testGalIDs())
+    mform_input, age_input, z_input = np.zeros(len(galids)), np.zeros(len(galids)), np.zeros(len(galids)) # input 
+    mform_inf_non, age_inf_non, z_inf_non= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # no noise
+    mform_inf_bgs, age_inf_bgs, z_inf_bgs= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # bgs noise
+    
+    # histogram of the comparison
+    fig1 = plt.figure(figsize=(20,6))
+    fig2 = plt.figure(figsize=(20,6))
+    for iobs in range(7):
+        for i, galid in enumerate(galids): 
+            # read in input M_total 
+            lgal = Lgal(galid)
+            mform_input[i] = 10**lgal['logM_total']
+            # mass weighted age and metallicity 
+            age_input[i] = np.average(lgal['tage'], weights=lgal['sfh_disk']+lgal['sfh_bulge']) 
+            z_input[i] = np.average(np.concatenate([lgal['Z_disk'], lgal['Z_bulge']]), 
+                    weights=np.concatenate([lgal['sfh_disk'], lgal['sfh_bulge']]))
+
+            # read in source spectrum FF file 
+            ffly_out, ffly_prop = UT.readmyFirefly(mff_non(galid)) 
+            mform_inf_non[i,1] = 10**ffly_prop['logM_total']
+            mform_inf_non[i,0] = 10**ffly_prop['logM_total_up_1sig']
+            mform_inf_non[i,2] = 10**ffly_prop['logM_total_low_1sig']
+            
+            age_inf_non[i,1] = ffly_prop['age_massW']
+            age_inf_non[i,0] = ffly_prop['age_massW_up_1sig'] 
+            age_inf_non[i,2] = ffly_prop['age_massW_low_1sig']
+            z_inf_non[i,1] = 10**ffly_prop['logZ_massW'] * 0.0190
+            z_inf_non[i,0] = 10**ffly_prop['logZ_massW_up_1sig'] * 0.0190
+            z_inf_non[i,2] = 10**ffly_prop['logZ_massW_low_1sig'] * 0.0190
+            
+            # read in BGS spectrum FF file 
+            ffly_out, ffly_prop = UT.readmyFirefly(mff_bgs(galid, iobs)) 
+            mform_inf_bgs[i,1] = 10**ffly_prop['logM_total']
+            mform_inf_bgs[i,0] = 10**ffly_prop['logM_total_up_1sig']
+            mform_inf_bgs[i,2] = 10**ffly_prop['logM_total_low_1sig']
+            
+            age_inf_bgs[i,1] = ffly_prop['age_massW']
+            age_inf_bgs[i,0] = ffly_prop['age_massW_up_1sig'] 
+            age_inf_bgs[i,2] = ffly_prop['age_massW_low_1sig']
+            z_inf_bgs[i,1] = 10**ffly_prop['logZ_massW'] * 0.0190
+            z_inf_bgs[i,0] = 10**ffly_prop['logZ_massW_up_1sig'] * 0.0190
+            z_inf_bgs[i,2] = 10**ffly_prop['logZ_massW_low_1sig'] * 0.0190
+
+        sub1 = fig1.add_subplot(131)
+        if iobs == 0: 
+            sub1.hist(np.log10(mform_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+            sub1.hist(np.log10(mform_inf_non[:,1]), range=(9,12), bins=20, histtype='step', 
+                    color='k', linewidth=1, linestyle=':', label='Firefly (noiseless)')
+        sub1.hist(np.log10(mform_inf_bgs[:,1]), range=(9,12), bins=20, histtype='step', 
+                color='C'+str(iobs+1), linewidth=1, linestyle=':', label=r'$i_{\rm obs}=%i$' % iobs)
+        sub1.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
+        sub1.set_xlim([9, 12])
+        sub1.legend(loc='upper left', fontsize=15) 
+    
+        sub1 = fig1.add_subplot(132)
+        if iobs == 0: 
+            sub1.hist(age_input, range=(0,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+            sub1.hist(age_inf_non[:,1], range=(0,12), bins=20, histtype='step', color='k', linewidth=1, linestyle=':')
+        sub1.hist(age_inf_bgs[:,1], range=(0,12), bins=20, histtype='step', color='C'+str(iobs+1), linewidth=1, linestyle=':')
+        sub1.set_xlabel(r'mass weighted age [Gyr]', fontsize=25) 
+        sub1.set_xlim([0, 12])
+        
+        sub1 = fig1.add_subplot(133)
+        if iobs == 0: 
+            sub1.hist(np.log10(z_input/0.0190), range=(-1.5,1), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+            sub1.hist(np.log10(z_inf_non[:,1]/0.0190), range=(-1.5,1), bins=20, histtype='step', color='k', linewidth=1, linestyle=':')
+        sub1.hist(np.log10(z_inf_bgs[:,1]/0.0190), range=(-1.5,1), bins=20, histtype='step', color='C'+str(iobs+1), linewidth=1, linestyle=':')
+        sub1.set_xlabel(r'mass weighted $\log(Z/Z_\odot)$', fontsize=25) 
+        sub1.set_xlim([-1.5,1])
+
+        sub2 = fig2.add_subplot(131)
+        if iobs == 0: 
+            sub2.hist(np.log10(mform_input) - np.log10(mform_inf_non[:,1]), range=(-1.5,1.5), bins=20, 
+                    histtype='stepfilled', color='k', alpha=0.5, label='Firefly (noiseless)')
+        sub2.hist(np.log10(mform_input) - np.log10(mform_inf_bgs[:,1]), range=(-1.5,1.5), bins=20, 
+                histtype='stepfilled', color='C'+str(iobs+1), alpha=0.5, label=r'$i_{\rm obs} = %s$' % iobs)
+        sub2.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(firefly)}\,)$ ', fontsize=20) 
+        sub2.set_xlim([-1.5, 1.5])
+        sub2.legend(loc='upper left', fontsize=15) 
+        
+        sub2 = fig2.add_subplot(132)
+        if iobs == 0: 
+            sub2.hist(age_input - age_inf_non[:,1], range=(-6,6), bins=20, 
+                    histtype='stepfilled', color='k', alpha=0.5)
+        sub2.hist(age_input - age_inf_bgs[:,1], range=(-6,6), bins=20, 
+                histtype='stepfilled', color='C'+str(iobs+1), alpha=0.5)
+        sub2.set_xlabel(r'mass weighted $\mathrm{age}^\mathrm{(input)} - \mathrm{age}^\mathrm{(firefly)}$', fontsize=15) 
+        sub2.set_xlim([-6, 6])
+        
+        sub2 = fig2.add_subplot(133)
+        if iobs == 0: 
+            sub2.hist(np.log10(z_input) - np.log10(z_inf_non[:,1]), range=(-2.,2.), bins=20, 
+                    histtype='stepfilled', color='k', alpha=0.5)
+        sub2.hist(np.log10(z_input) - np.log10(z_inf_bgs[:,1]), range=(-2.,2.), bins=20, 
+                histtype='stepfilled', color='C'+str(iobs+1), alpha=0.5)
+        sub2.set_xlabel(r'mass weighted $\log Z^\mathrm{(input)} - \log Z^\mathrm{(firefly)}$', fontsize=15) 
+        sub2.set_xlim([-2., 2.])
+    fig1.savefig(os.path.join(UT.fig_dir(), 'mFF_LGal_hist_%s.obs.png' % str_dust), bbox_inches='tight') 
+    fig2.savefig(os.path.join(UT.fig_dir(), 'mFF_LGal_delta_hist_%s.obs.png' % str_dust), bbox_inches='tight') 
+    plt.close() 
     return None 
 
 ################################################
@@ -829,16 +993,19 @@ if __name__=="__main__":
     # save observing sky brightnesses
     #_ = obs_SkyBrightness(sampling='spacefill', validate=True)
     
-    mFF_comparison(0, lib='bc03', obs_sampling='spacefill', dust=True)
-    mFF_comparison(0, lib='bc03', obs_sampling='spacefill', dust=False)
-    raise ValueError
     # load test set gal ids 
     galids = testGalIDs()
-    for iobs in [0]: #range(1,8): 
-        for ii, galid in enumerate(np.unique(galids)): 
+    for iobs in [5]: #range(7,8): 
+        continue 
+        #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
+        #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
+        #for ii, galid in enumerate(np.unique(galids)[-8:]): 
+        for galid in [309316]:  
             #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, overwrite=True, validate=True)
             #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, overwrite=True, validate=True)
-            mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
-            mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
-            mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=True)
+            #mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=True)
             mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, validate=True)
+        #mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=False)
+        #mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True)
+
+    mFF_comparison_iobs(lib='bc03', obs_sampling='spacefill', dust=True)
