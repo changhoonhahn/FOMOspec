@@ -51,9 +51,9 @@ def Lgal_nonoisePhoto(galid, lib='bc03', dust=False, overwrite=False, validate=F
         else: 
             flux = spec_source['flux_nodust_nonoise']
         # apply filters
-        filter_response = specFilter.load_filters('decam2014-g', 'decam2014-r', 'decam2014-z')
+        filter_response = specFilter.load_filters('decam2014-g', 'decam2014-r', 'decam2014-z','wise2010-W1', 'wise2010-W2', 'wise2010-W3', 'wise2010-W4')
         mags = filter_response.get_ab_magnitudes(flux*U.Watt/U.m**2/U.Angstrom, spec_source['wave']*U.Angstrom)
-        np.savetxt(fphot, mags, header='g, r, z magnitudes')
+        np.savetxt(fphot, mags, header='g, r, z, W1, W2, W3, W4 magnitudes')
     return mags 
 
 
