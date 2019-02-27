@@ -33,24 +33,29 @@ class iFSPS(object):
         self.model_name = model_name
         self.cosmo = cosmo # cosmology  
         self.ssp = self._ssp_initiate() # initial ssp
+        self.set_prior(None) 
 
     def model(self, tt_arr, zred=None, outwave=None): 
         ''' very simple wrapper for a fsps model with minimal overhead compared to 
         prospector
         '''
+        zred = np.atleast_1d(zred)
         theta = self._theta(tt_arr) 
         ntheta = len(theta['mass']) 
-        #mfrac = np.zeros_like(mass)
+        mfrac = np.zeros(ntheta)
 
         if self.model_name == 'vanilla': 
             for i, t, z, d, tau in zip(range(ntheta), theta['tage'], theta['Z'], theta['dust2'], theta['tau']): 
                 self.ssp.params['logzsol']  = np.log10(z/0.0190) # log(z/zsun) 
                 self.ssp.params['dust2']    = d # dust2 parameter in fsps 
                 self.ssp.params['tau']      = tau # sfh parameter 
-                w, ssp_lum = self.ssp.get_spectrum(tage=theta['tage'], peraa=True) 
+                w, ssp_lum = self.ssp.get_spectrum(tage=t, peraa=True) 
 
                 mfrac[i] = self.ssp.stellar_mass
-                if i == 0: ssp_lums = np.zeros((len(mass), len(w)))
+                if i == 0: 
+                    ws = np.zeros((ntheta, len(w)))
+                    ssp_lums = np.zeros((ntheta, len(w)))
+                ws[i,:] = w 
                 ssp_lums[i,:] = ssp_lum
         elif self.model_name == 'dustless_vanilla': 
             for i, t, z, tau in zip(range(ntheta), theta['tage'], theta['Z'], theta['tau']): 
@@ -59,24 +64,82 @@ class iFSPS(object):
                 w, ssp_lum = self.ssp.get_spectrum(tage=theta['tage'], peraa=True) 
 
                 mfrac[i] = self.ssp.stellar_mass
-                if i == 0: ssp_lums = np.zeros((len(mass), len(w)))
+                if i == 0: ssp_lums = np.zeros((ntheta, len(w)))
                 ssp_lums[i,:] = ssp_lum
-        
         # mass normalization
-        spectrum = np.dot(mass, ssp_lums) 
+        lum_ssp = theta['mass'][:,None] * ssp_lums
         #mfrac_sum = np.dot(mass, mfrac) / msas 
 
         # redshift the spectra
-        w_z = w * (1. + zred) 
+        w_z = ws * (1. + zred)[:,None] 
         d_lum = self.cosmo.luminosity_distance(zred).to(U.cm).value # luminosity distance in cm
-        flux_z = lum_ssp * UT.Lsun() / (4. * np.pi * d_lum**2) / (1. + zred) 
+        flux_z = lum_ssp * UT.Lsun() / (4. * np.pi * d_lum[:,None]**2) / (1. + zred)[:,None]
 
         if outwave is None: 
             outwave = w_z
             outspec = flux_z
         else: 
-            outspec = np.interp(outwave, w_z, flux_z, left=0, right=0)
+            outwave = np.atleast_2d(outwave)
+            outspec = np.zeros_like(outwave)
+            for i, _w, _f in zip(range(outwave.shape[0]), w_z, flux_z): 
+                outspec[i,:] = np.interp(outwave, _w, _f, left=0, right=0)
         return outwave, outspec 
+    
+    def mcmc(self, wave_obs, flux_obs, flux_err_obs, zred, nwalkers=100, threads=15): 
+        '''
+        '''
+        ndim = len(self.priors) 
+        lnpost_args = (wave_bos, flux_obs, flux_err_obs, zred) 
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpostfn, args=lnpost_args, threads=threads)
+        # finish implementing mcmc
+
+
+    def lnPost(self, tt_arr, wave_obs, flux_obs, flux_err_obs, zred, prior_shape='flat'): 
+        ''' posterior(theta) 
+
+        :param tt_arr: 
+        '''
+        lp = self.lnPrior(tt_arr, shape=prior_shape) # ln(prior) 
+        if not np.isfinite(lp): return -np.inf
+
+        _, flux = self.model(tt_arr, zred=zred, outwave=wave_obs) 
+        dflux = (flux - flux_obs) 
+        return lp - 0.5 * np.sum(dflux**2/flux_err_obs**2) 
+
+    def lnPrior(self, tt_arr, shape='flat'): 
+        ''' prior(theta) 
+        '''
+        if shape not in ['flat']: raise NotImplementedError
+        prior_arr = np.array(self.priors)
+        prior_min, prior_max = prior_arr[:,0], prior_arr[:,1]
+
+        if ((tt_arr - prior_min).min() < 0.) or ((prior_max - tt_arr).min() < 0.): 
+            return -np.inf 
+        else: 
+            return 0.
+
+    def set_prior(self, priors): 
+        ''' method for setting priors. 
+        '''
+        if priors is None: # default priors
+            p_mass  = (1e8, 1e13)    # mass
+            p_z     = (1e-3, 1e1)    # Z 
+            p_tage  = (0., 13.)      # tage
+            p_d2    = (0., 10.)      # dust 2 
+            p_tau   = (0.1, 1e2)     # tau 
+
+            if self.model_name == 'vanilla': 
+                priors = [p_mass, p_z, p_tage, p_d2, p_tau]
+            elif self.model_name == 'dustless_vanilla': # thetas: mass, Z, tage, tau
+                priors = [p_mass, p_z, p_tage, p_tau]
+        else: 
+            if self.model_name == 'vanilla': 
+                assert len(priors) == 5, 'specify priors for mass, Z, tage, dust2, and tau'
+            elif self.model_name == 'dustless_vanilla': 
+                assert len(priors) == 4, 'specify priors for mass, Z, tage, and tau'
+        
+        self.priors = priors
+        return None 
 
     def _ssp_initiate(self): 
         ''' initialize sps (FSPS StellarPopulaiton object) 
@@ -102,7 +165,6 @@ class iFSPS(object):
         '''
         theta = {} 
         tt_arr = np.atleast_2d(tt_arr) 
-        print tt_arr
         if self.model_name == 'vanilla': 
             # tt_arr columns: mass, Z, tage, dust2, tau
             theta['mass']   = tt_arr[:,0]

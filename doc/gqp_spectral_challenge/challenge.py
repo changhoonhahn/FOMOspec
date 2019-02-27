@@ -36,9 +36,9 @@ mpl.rcParams['ytick.major.width'] = 1.5
 mpl.rcParams['legend.frameon'] = False
 
 ################################################
-# prospector fits
+# iFSPS fits
 ################################################
-def Prosp_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False): 
+def iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False): 
     ''' fit noiseless spectra generated from Rita's forward model using Prospector 
 
     :param galid: 
@@ -63,7 +63,6 @@ def Prosp_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False):
     else: flux = source['flux_nodust_nonoise'] 
     flux_err = flux * 0.01 # 1% noise 
     zred = source['redshift'] 
-
 
     # output file name 
     f_non = f_nonoise(galid, lib=lib)

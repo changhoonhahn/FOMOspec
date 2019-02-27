@@ -91,8 +91,9 @@ def code_dir():
 def fig_dir(): 
     ''' directory to dump all the figure files 
     '''
-    if os.path.isdir(code_dir()+'figs/'):
-        return code_dir()+'figs/'
+    dir_fig = os.path.join(code_dir(), 'figs') 
+    if os.path.isdir(dir_fig):
+        return dir_fig 
     else: 
         raise ValueError("create figs/ folder in $FOMOSPEC_CODEDIR directory for figures")
 
