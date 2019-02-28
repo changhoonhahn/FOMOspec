@@ -73,26 +73,42 @@ class iFSPS(object):
         # redshift the spectra
         w_z = ws * (1. + zred)[:,None] 
         d_lum = self.cosmo.luminosity_distance(zred).to(U.cm).value # luminosity distance in cm
-        flux_z = lum_ssp * UT.Lsun() / (4. * np.pi * d_lum[:,None]**2) / (1. + zred)[:,None]
+        flux_z = lum_ssp * UT.Lsun() / (4. * np.pi * d_lum[:,None]**2) / (1. + zred)[:,None] * 1e17 # 10^-17 ergs/s/cm^2/Ang
 
         if outwave is None: 
             outwave = w_z
             outspec = flux_z
         else: 
             outwave = np.atleast_2d(outwave)
-            outspec = np.zeros_like(outwave)
+            outspec = np.zeros((flux_z.shape[0], outwave.shape[1]))
             for i, _w, _f in zip(range(outwave.shape[0]), w_z, flux_z): 
-                outspec[i,:] = np.interp(outwave, _w, _f, left=0, right=0)
+                outspec[i,:] = np.interp(outwave[i,:], _w, _f, left=0, right=0)
         return outwave, outspec 
     
-    def mcmc(self, wave_obs, flux_obs, flux_err_obs, zred, nwalkers=100, threads=15): 
+    def mcmc(self, wave_obs, flux_obs, flux_err_obs, zred, nwalkers=100, niter=1000, threads=1): 
         '''
         '''
+        import scipy.optimize as op
+        import emcee
         ndim = len(self.priors) 
-        lnpost_args = (wave_bos, flux_obs, flux_err_obs, zred) 
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpostfn, args=lnpost_args, threads=threads)
-        # finish implementing mcmc
+        # get initial theta
+        lnpost_args = (wave_obs, 
+                flux_obs * 1e17,        # 10^-17 ergs/s/cm^2/Ang
+                flux_err_obs * 1e17,    # 10^-17 ergs/s/cm^2/Ang
+                zred) 
+        print('start', np.average(np.array(self.priors), axis=1)) 
+        dprior = np.array(self.priors)[:,1] - np.array(self.priors)[:,0]  
+        _lnpost = lambda *args: -2. * self.lnPost(*args) 
+        min_result = op.minimize(_lnpost, np.average(np.array(self.priors), axis=1), 
+                args=lnpost_args, method='BFGS', options={'eps': 0.01 * dprior, 'maxiter': 100})
+        tt0 = min_result['x'] 
+        print('theta guess =', tt0) 
 
+        pos = [tt0 + 1.e-4 * dprior * np.random.randn(ndim) for i in range(nwalkers)]
+
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnPost, args=lnpost_args, threads=threads)
+        sampler.run_mcmc(pos, niter)
+        return sampler 
 
     def lnPost(self, tt_arr, wave_obs, flux_obs, flux_err_obs, zred, prior_shape='flat'): 
         ''' posterior(theta) 
@@ -101,10 +117,15 @@ class iFSPS(object):
         '''
         lp = self.lnPrior(tt_arr, shape=prior_shape) # ln(prior) 
         if not np.isfinite(lp): return -np.inf
+        return lp - 0.5 * self.chi2(tt_arr, wave_obs, flux_obs, flux_err_obs, zred)
 
+    def chi2(self, tt_arr, wave_obs, flux_obs, flux_err_obs, zred): 
+        ''' chi-squared 
+        '''
         _, flux = self.model(tt_arr, zred=zred, outwave=wave_obs) 
         dflux = (flux - flux_obs) 
-        return lp - 0.5 * np.sum(dflux**2/flux_err_obs**2) 
+        _chi2 = np.sum(dflux**2/flux_err_obs**2) 
+        return _chi2
 
     def lnPrior(self, tt_arr, shape='flat'): 
         ''' prior(theta) 
@@ -112,21 +133,23 @@ class iFSPS(object):
         if shape not in ['flat']: raise NotImplementedError
         prior_arr = np.array(self.priors)
         prior_min, prior_max = prior_arr[:,0], prior_arr[:,1]
+        dtt_min = tt_arr - prior_min 
+        dtt_max = prior_max - tt_arr
 
-        if ((tt_arr - prior_min).min() < 0.) or ((prior_max - tt_arr).min() < 0.): 
+        if (np.min(dtt_min) < 0.) or (np.max(dtt_max) < 0.): 
             return -np.inf 
-        else: 
+        else:
             return 0.
 
     def set_prior(self, priors): 
         ''' method for setting priors. 
         '''
         if priors is None: # default priors
-            p_mass  = (1e8, 1e13)    # mass
-            p_z     = (1e-3, 1e1)    # Z 
+            p_mass  = (8, 13)    # mass
+            p_z     = (-3, 1)    # Z 
             p_tage  = (0., 13.)      # tage
             p_d2    = (0., 10.)      # dust 2 
-            p_tau   = (0.1, 1e2)     # tau 
+            p_tau   = (0.1, 10.)     # tau 
 
             if self.model_name == 'vanilla': 
                 priors = [p_mass, p_z, p_tage, p_d2, p_tau]
@@ -167,15 +190,15 @@ class iFSPS(object):
         tt_arr = np.atleast_2d(tt_arr) 
         if self.model_name == 'vanilla': 
             # tt_arr columns: mass, Z, tage, dust2, tau
-            theta['mass']   = tt_arr[:,0]
-            theta['Z']      = tt_arr[:,1]
+            theta['mass']   = 10**tt_arr[:,0]
+            theta['Z']      = 10**tt_arr[:,1]
             theta['tage']   = tt_arr[:,2]
             theta['dust2']  = tt_arr[:,3]
             theta['tau']    = tt_arr[:,4]
         elif self.model_name == 'dustless_vanilla': 
             # tt_arr columns: mass, Z, tage, tau
-            theta['mass']   = tt_arr[:,0]
-            theta['Z']      = tt_arr[:,1]
+            theta['mass']   = 10**tt_arr[:,0]
+            theta['Z']      = 10**tt_arr[:,1]
             theta['tage']   = tt_arr[:,2]
             theta['tau']    = tt_arr[:,4]
         else: 

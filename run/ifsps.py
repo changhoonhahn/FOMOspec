@@ -79,19 +79,61 @@ def ifsps_prior():
 def ifsps_posterior(): 
     ifsps = fitters.iFSPS(model_name='vanilla')
     # theta: mass, Z, t_age, dust2, tau 
-    tt_fid = np.array([1e9, 0.019, 10., 0., 2.])
+    tt_fid = np.array([9, np.log10(0.019), 10., 0., 2.])
     w, spec = ifsps.model(tt_fid, zred=0.1)
     spec_err = 0.1*spec
 
-    tt_tau_p = np.array([1e9, 0.019, 10., 0., 3.])
-    tt_tau_pp = np.array([1e9, 0.019, 10., 0., 5.])
-    tt_tau_ppp = np.array([1e9, 0.019, 10., 0., 1e3])
-    for tt in [tt_fid, tt_tau_p, tt_tau_pp, tt_tau_ppp]: 
-        print ifsps.lnPost(tt, 0.1, spec, spec_err, outwave=w) 
+    tt_tau_p = np.array([9, np.log10(0.019), 10., 0., 5.])
+    tt_tau_pp = np.array([9, np.log10(0.019), 10., 0., 5.15])
+    #tt_tau_ppp = np.array([9, np.log10(0.019), 10., 0., 1e3])
+    for tt in [tt_fid, tt_tau_p, tt_tau_pp]:#, tt_tau_ppp]: 
+        print -2. * ifsps.lnPost(tt, w, spec, spec_err, 0.1)
+
+    raise ValueError
+    tt_mass_p = np.array([9.5, np.log10(0.019), 10., 0., 2.])
+    tt_mass_pp = np.array([10., np.log10(0.019), 10., 0., 2.])
+    tt_mass_ppp = np.array([11., np.log10(0.019), 10., 0., 2.])
+    for tt in [tt_fid, tt_mass_p, tt_mass_pp, tt_mass_ppp]: 
+        print ifsps.lnPost(tt, w, spec, spec_err, 0.1)
     return None
+
+
+def ifsps_chi2(): 
+    ifsps = fitters.iFSPS(model_name='vanilla')
+    # theta: mass, Z, t_age, dust2, tau 
+    tt_fid = np.array([9, np.log10(0.019), 10., 0., 2.])
+    w, spec = ifsps.model(tt_fid, zred=0.1)
+    wlim = (w > 3000.) & (w < 10000.)
+    w = w[wlim]
+    spec = spec[wlim] / 1e17
+    spec_err = 0.1*spec
+
+    tt1 = np.array([10.5, -1, 6.5, 5., 5.05])
+    tt2 = np.array([10.6, -1, 6.5, 5., 5.05])
+    tt3 = np.array([10.5, -0.9, 6.5, 5., 5.05])
+    tt4 = np.array([10.5, -1, 6.5, 5.1, 5.05])
+    for tt in [tt1, tt2, tt3, tt4]: 
+        print -2. * ifsps.lnPost(tt, w, spec * 1e17, spec_err * 1e17, 0.1)
+    return None
+
+
+def ifsps_mcmc(): 
+    ifsps = fitters.iFSPS(model_name='vanilla')
+    # theta: mass, Z, t_age, dust2, tau 
+    tt_fid = np.array([9, np.log10(0.019), 10., 0., 2.])
+    w, spec = ifsps.model(tt_fid, zred=0.1)
+    wlim = (w > 3000.) & (w < 10000.)
+    w = w[wlim]
+    spec = spec[wlim] / 1e17 
+    spec_err = 0.1*spec
+    print ifsps.mcmc(w, spec, spec_err, 0.1, nwalkers=100) 
+    return None
+
 
 
 if __name__=="__main__": 
     #ifsps()
     #ifsps_prior()
-    ifsps_posterior()
+    #ifsps_posterior()
+    #ifsps_chi2()
+    ifsps_mcmc()
