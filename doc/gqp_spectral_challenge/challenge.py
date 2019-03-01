@@ -59,34 +59,38 @@ def iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False):
     # read source spectra 
     source = Lgal_nonoiseSpectra(galid, lib=lib)
     wave = source['wave'] 
+    wlim = (wave > 3e3) & (wave < 1e4) 
+    wave = wave[wlim]
     if dust: flux = source['flux_dust_nonoise']
     else: flux = source['flux_nodust_nonoise'] 
-    flux_err = flux * 0.01 # 1% noise 
+    flux = flux[wlim] / 1e17
+    flux_err = np.ones(len(flux)) * 1e-17
     zred = source['redshift'] 
 
     # output file name 
     f_non = f_nonoise(galid, lib=lib)
     if dust: str_dust = 'dust'
     else: str_dust = 'nodust'
-    f_prosp = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs', 
-            ''.join(['Prosp.', f_non.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.', str_dust, '.hdf5']))
-    
-    # run prospector
-    prosp = Fitters.Prospector()
-    prosp.emcee_spec(wave, flux, None, zred, mask=mask, 
-            write=True, output_file=f_prosp, silent=False)
-    
+    f_ifsps = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs', 
+            ''.join(['iFSPS.', f_non.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.', str_dust, '.hdf5']))
+
+    # run iFSPS 
+    if dust: 
+        ifsps = Fitters.iFSPS(model_name='vanilla')
+    else: 
+        ifsps = Fitters.iFSPS(model_name='dustless_vanilla')
+    post = ifsps.mcmc(wave, flux, flux_err, zred, nwalkers=100, writeout=f_ifsps)
+
     if validate: # validation plot 
         fig = plt.figure(figsize=(12,10))
         gs = mpl.gridspec.GridSpec(2,2, figure=fig) 
         sub = plt.subplot(gs[0,:]) # flux plot
-        sub.plot(wave, flux, c='C0', lw=1, label='LGal BGS spectrum')
-        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux_model'], c='C1', label='FIREFLY best-fit')
-        sub.plot(ff_fit['wavelength'] * (1. + zred), ff_fit['flux'] - ff_fit['flux_model'], c='r', label='residual') 
-        sub.text(0.05, 0.95, ('$M_\mathrm{tot}=10^{%.2f}; M_\mathrm{firefly} = 10^{%.2f}$' % 
-            (ellgal['logM_total'], ff_prop['logM_total'])), ha='left', va='top', transform=sub.transAxes, fontsize=20)
+        sub.plot(wave, flux*1e17, c='C0', lw=1, label='LGal BGS spectrum')
+        sub.plot(post['wavelength_model'].flatten(), post['flux_model'].flatten(), c='C1', label='iFSPS best-fit')
+        sub.text(0.05, 0.95, ('$M_\mathrm{tot}=10^{%.2f}; M_\mathrm{iFSPS} = 10^{%.2f}$' % 
+            (ellgal['logM_total'], post['theta_med'][0])), ha='left', va='top', transform=sub.transAxes, fontsize=20)
         sub.set_xlabel('observed-frame wavelength', fontsize=25)
-        sub.set_xlim([3e3, 1e4])
+        sub.set_xlim(3e3, 1e4)
         sub.set_ylabel('flux [$erg/s/cm^2/A$]', fontsize=25)
         sub.legend(loc='upper right', fontsize=20)
         
@@ -94,7 +98,7 @@ def iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False):
         sub.plot(ellgal['tage'], ellgal['sfh_bulge'], c='C0', ls=':', label='Bulge')
         sub.plot(ellgal['tage'], ellgal['sfh_disk'], c='C0', ls='--', label='Disk')
         sub.plot(ellgal['tage'], ellgal['sfh_bulge'] + ellgal['sfh_disk'], c='C0', label='Total')
-        sub.plot(ssp_age, ssp_mtot, c='C1')
+        sub.plot([0., 13.], [10**post['theta_med'][0], 10**post['theta_med'][0]],c='C1')
         sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
         sub.set_xlim([0., 13.])
         sub.set_ylabel("$M_\mathrm{formed}$", fontsize=25)
@@ -104,17 +108,110 @@ def iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False):
         sub = plt.subplot(gs[1,1]) # ZH
         sub.plot(ellgal['tage'], ellgal['Z_bulge'], c='C0', ls=':', label='Bulge')
         sub.plot(ellgal['tage'], ellgal['Z_disk'], c='C0', ls='--', label='Disk')
-        sub.plot(ssp_age, ssp_z, c='C1')
+        sub.plot([0., 13.], [10**post['theta_med'][1], 10**post['theta_med'][1]], c='C1')
         sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
         sub.set_xlim([0., 13.])
         sub.set_ylabel("metallicity, $Z$", fontsize=25)
         sub.set_yscale('log') 
         sub.set_ylim([1e-3, 1e-1]) 
         fig.subplots_adjust(wspace=0.25, hspace=0.25)
-        fig.savefig(''.join([f_mff.rsplit('.hdf5',1)[0], '.png']), bbox_inches='tight') 
+        fig.savefig(''.join([f_ifsps.rsplit('.hdf5',1)[0], '.png']), bbox_inches='tight') 
         plt.close() 
     return None 
 
+
+def iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=False): 
+    ''' fit BGS spectra generated from Rita's forward model using firefly 
+
+    :param galid: 
+        galaxy id number
+
+    :param iobs: 
+        index of sampled observing conditions 
+
+    :param lib: (default: 'bc03') 
+        specify stellar population synthesis library. Options are
+        'bc03' and 'fsps'
+
+    :param obs_sampling: (default: 'spacefill') 
+        method for sampling the observation 
+
+    :param dust: (default: False) 
+        spectra with or without dust. 
+
+    :param validate: (default: False)
+        if True, it will generate a plot 
+
+    :return : 
+        dictionary with 
+    '''
+    # read in SF+Z histories
+    ellgal = Lgal(galid)
+    # read source spectra 
+    source = Lgal_nonoiseSpectra(galid, lib=lib)
+    zred = source['redshift'] 
+    
+    # read bgs spectra 
+    bgs = Lgal_BGSnoiseSpec(galid, iobs, lib=lib, obs_sampling=obs_sampling, dust=dust)
+    wave_bgs = np.concatenate([bgs['wave_'+b] for b in ['b', 'r', 'z']])      # observed frame
+    flux_bgs = np.concatenate([bgs['flux_'+b][0] for b in ['b', 'r', 'z']])   # 10-17 ergs/s/cm2/AA
+    flux_err_bgs = np.concatenate([bgs['ivar_'+b][0]**-0.5 for b in ['b', 'r', 'z']])
+    
+    wavesort = np.argsort(wave_bgs) # sort by wavelenght
+    wave_bgs = wave_bgs[wavesort]
+    flux_bgs = flux_bgs[wavesort]
+    flux_err_bgs = flux_err_bgs[wavesort]
+    
+    # output file name 
+    f_bgs = f_BGS(galid, iobs, lib=lib, obs_sampling=obs_sampling, dust=dust)
+    f_ifsps = ''.join([f_bgs.rsplit('/', 1)[0], '/iFSPS.', f_bgs.rsplit('/', 1)[1].rsplit('.fits', 1)[0], '.hdf5'])
+    # run iFSPS 
+    if dust: 
+        ifsps = Fitters.iFSPS(model_name='vanilla')
+    else: 
+        ifsps = Fitters.iFSPS(model_name='dustless_vanilla')
+    post = ifsps.mcmc(wave_bgs, flux_bgs, flux_err_bgs, zred, mask='emline', 
+            nwalkers=100, burnin=200, niter=1000, threads=1, writeout=f_ifsps) 
+    print post['theta_med']
+    print('input: total_mass = %f' % ellgal['logM_total'])  
+    print('iFSPS: total mass = %f' % post['theta_med'][0]) 
+    if validate: # validation plot 
+        fig = plt.figure(figsize=(12,10))
+        gs = mpl.gridspec.GridSpec(2,2, figure=fig) 
+        sub = plt.subplot(gs[0,:]) # flux plot
+        sub.plot(wave_bgs, flux_bgs, c='C0', lw=1, label='LGal BGS spectrum')
+        sub.plot(post['wavelength_model'], post['flux_model'], c='C1', label='iFSPS best-fit')
+        sub.text(0.05, 0.95, ('$M_\mathrm{tot}=10^{%.2f}; M_\mathrm{iFSPS} = 10^{%.2f}$' % 
+            (ellgal['logM_total'], post['theta_med'][0])), ha='left', va='top', transform=sub.transAxes, fontsize=20)
+        sub.set_xlabel('observed-frame wavelength', fontsize=25)
+        sub.set_xlim([3e3, 1e4])
+        sub.set_ylabel('flux [$erg/s/cm^2/A$]', fontsize=25)
+        sub.legend(loc='upper right', fontsize=20)
+        
+        sub = plt.subplot(gs[1,0]) # SFH
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['sfh_disk'], c='C0', ls='--', label='Disk')
+        sub.plot(ellgal['tage'], ellgal['sfh_bulge'] + ellgal['sfh_disk'], c='C0', label='Total')
+        sub.plot([0., 13.], [10**post['theta_med'][0], 10**post['theta_med'][0]], c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("$M_\mathrm{formed}$", fontsize=25)
+        sub.set_yscale("log")
+        sub.set_ylim([5e6, 5e10]) 
+        
+        sub = plt.subplot(gs[1,1]) # ZH
+        sub.plot(ellgal['tage'], ellgal['Z_bulge'], c='C0', ls=':', label='Bulge')
+        sub.plot(ellgal['tage'], ellgal['Z_disk'], c='C0', ls='--', label='Disk')
+        sub.plot([0., 13.], [10**post['theta_med'][1], 10**post['theta_med'][1]], c='C1')
+        sub.set_xlabel('Lookback Time [$Gyr$]', fontsize=20)
+        sub.set_xlim([0., 13.])
+        sub.set_ylabel("metallicity, $Z$", fontsize=25)
+        sub.set_yscale('log') 
+        sub.set_ylim([1e-3, 1e-1]) 
+        fig.subplots_adjust(wspace=0.25, hspace=0.25)
+        fig.savefig(''.join([f_ifsps.rsplit('.hdf5',1)[0], '.png']), bbox_inches='tight') 
+        plt.close() 
+    return None 
 
 ################################################
 # firefly fits
@@ -994,12 +1091,13 @@ if __name__=="__main__":
     
     # load test set gal ids 
     galids = testGalIDs()
-    for iobs in [5]: #range(7,8): 
-        continue 
-        #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
-        #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
-        #for ii, galid in enumerate(np.unique(galids)[-8:]): 
-        for galid in [309316]:  
+    for iobs in [1]: #range(7,8): 
+        for ii, galid in enumerate(np.unique(galids)[1:5]): 
+            iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
+            iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
+            #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
+            #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
+            continue 
             #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, overwrite=True, validate=True)
             #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, overwrite=True, validate=True)
             #mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=True)
@@ -1007,4 +1105,4 @@ if __name__=="__main__":
         #mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=False)
         #mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True)
 
-    mFF_comparison_iobs(lib='bc03', obs_sampling='spacefill', dust=True)
+    #mFF_comparison_iobs(lib='bc03', obs_sampling='spacefill', dust=True)

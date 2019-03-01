@@ -2,6 +2,7 @@
 '''
 import os 
 import numpy as np 
+import corner as DFM
 from fomospec import fitters
 from fomospec import util as UT  
 # -- 
@@ -126,9 +127,17 @@ def ifsps_mcmc():
     w = w[wlim]
     spec = spec[wlim] / 1e17 
     spec_err = 0.1*spec
-    print ifsps.mcmc(w, spec, spec_err, 0.1, nwalkers=100) 
+    post = ifsps.mcmc(w, spec, spec_err, 0.1, nwalkers=100) 
+    chain = ifsps.sampler.flatchain
+    
+    print 'input', tt_fid
+    print 'output', post['theta_med'] 
+    lbls = [r'$\log M_*$', r'$\log Z$', r'$t_{\rm age}$', 'dust2', r'$\tau$']
+    fig = DFM.corner(chain, labels=lbls, truths=tt_fid, 
+            quantiles=[0.16, 0.5, 0.84], levels=[0.68, 0.95], range=ifsps.priors, 
+            smooth=True, bins=20, plot_datapoints=False, fill_contours=True, plot_density=False, color='C0') 
+    fig.savefig(os.path.join(UT.fig_dir(), 'ifsps_mcmc.test.png'),bbox_inches='tight') 
     return None
-
 
 
 if __name__=="__main__": 

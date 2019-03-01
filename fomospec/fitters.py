@@ -61,14 +61,16 @@ class iFSPS(object):
             for i, t, z, tau in zip(range(ntheta), theta['tage'], theta['Z'], theta['tau']): 
                 self.ssp.params['logzsol']  = np.log10(z/0.0190) # log(z/zsun) 
                 self.ssp.params['tau']      = tau # sfh parameter 
-                w, ssp_lum = self.ssp.get_spectrum(tage=theta['tage'], peraa=True) 
-
+                w, ssp_lum = self.ssp.get_spectrum(tage=t, peraa=True) 
+                
                 mfrac[i] = self.ssp.stellar_mass
-                if i == 0: ssp_lums = np.zeros((ntheta, len(w)))
+                if i == 0: 
+                    ws = np.zeros((ntheta, len(w)))
+                    ssp_lums = np.zeros((ntheta, len(w)))
+                ws[i,:] = w 
                 ssp_lums[i,:] = ssp_lum
         # mass normalization
         lum_ssp = theta['mass'][:,None] * ssp_lums
-        #mfrac_sum = np.dot(mass, mfrac) / msas 
 
         # redshift the spectra
         w_z = ws * (1. + zred)[:,None] 
@@ -85,46 +87,96 @@ class iFSPS(object):
                 outspec[i,:] = np.interp(outwave[i,:], _w, _f, left=0, right=0)
         return outwave, outspec 
     
-    def mcmc(self, wave_obs, flux_obs, flux_err_obs, zred, nwalkers=100, niter=1000, threads=1): 
+    def mcmc(self, wave_obs, flux_obs, flux_err_obs, zred, mask=None, 
+            nwalkers=100, burnin=100, niter=1000, threads=1, writeout=None): 
         '''
         '''
         import scipy.optimize as op
         import emcee
         ndim = len(self.priors) 
-        # get initial theta
+        
+        if mask is None: 
+            _mask = np.zeros(len(wave_obs)).astype(bool) 
+        elif mask == 'emline': 
+            w_lines = np.array([3728., 4861., 5007., 6564.]) * (1. + zred) 
+            
+            _mask = np.zeros(len(wave_obs)).astype(bool) 
+            for wl in w_lines: 
+                inemline = ((wave_obs > wl - 20) & (wave_obs < wl + 20))
+                _mask = (_mask | inemline)
+        elif isinstance(mask, np.ndarray): 
+            assert np.array_equal(mask, mask.astype(bool))
+            assert len(mask) == len(wave_obs) 
+            _mask = mask 
+
+        zero_err = (flux_err_obs <= 0.)
+        _mask = _mask | zero_err 
+
+        # posterior function args and kwargs
         lnpost_args = (wave_obs, 
                 flux_obs * 1e17,        # 10^-17 ergs/s/cm^2/Ang
                 flux_err_obs * 1e17,    # 10^-17 ergs/s/cm^2/Ang
                 zred) 
-        print('start', np.average(np.array(self.priors), axis=1)) 
+        lnpost_kwargs = {
+                'mask': _mask,           # emission line mask 
+                'prior_shape': 'flat'   # shape of prior (hardcoded) 
+                }
+
+        # get initial theta
         dprior = np.array(self.priors)[:,1] - np.array(self.priors)[:,0]  
-        _lnpost = lambda *args: -2. * self.lnPost(*args) 
+        _lnpost = lambda *args: -2. * self.lnPost(*args, **lnpost_kwargs) 
         min_result = op.minimize(_lnpost, np.average(np.array(self.priors), axis=1), 
                 args=lnpost_args, method='BFGS', options={'eps': 0.01 * dprior, 'maxiter': 100})
         tt0 = min_result['x'] 
-        print('theta guess =', tt0) 
 
-        pos = [tt0 + 1.e-4 * dprior * np.random.randn(ndim) for i in range(nwalkers)]
+        self.sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnPost, args=lnpost_args, kwargs=lnpost_kwargs, threads=threads)
+        p0 = [tt0 + 1.e-4 * dprior * np.random.randn(ndim) for i in range(nwalkers)]
+        # burn in 
+        pos, prob, state = self.sampler.run_mcmc(p0, burnin)
+        self.sampler.reset()
+        # run mcmc 
+        self.sampler.run_mcmc(pos, niter)
 
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnPost, args=lnpost_args, threads=threads)
-        sampler.run_mcmc(pos, niter)
-        return sampler 
+        chain = self.sampler.flatchain
+        lowlow, low, med, high, highhigh = np.percentile(chain, [2.5, 16, 50, 84, 97.5], axis=0)
+    
+        output = {} 
+        output['redshift'] = zred
+        output['theta_med'] = med 
+        output['theta_1sig_plus'] = high
+        output['theta_2sig_plus'] = highhigh
+        output['theta_1sig_minus'] = low
+        output['theta_2sig_minus'] = lowlow
+    
+        w_model, flux_model = self.model(med, zred=zred, outwave=wave_obs)
+        output['wavelength_model'] = w_model
+        output['flux_model'] = flux_model 
+        output['wavelength_data'] = wave_obs
+        output['flux_data'] = flux_obs
+        output['flux_err_data'] = flux_err_obs
 
-    def lnPost(self, tt_arr, wave_obs, flux_obs, flux_err_obs, zred, prior_shape='flat'): 
+        if writeout is not None: 
+            fh5  = h5py.File(writeout, 'w') 
+            for k in output.keys(): 
+                fh5.create_dataset(k, data=output[k]) 
+            fh5.close() 
+        return output  
+
+    def lnPost(self, tt_arr, wave_obs, flux_obs, flux_err_obs, zred, mask=None, prior_shape='flat'): 
         ''' posterior(theta) 
 
         :param tt_arr: 
         '''
         lp = self.lnPrior(tt_arr, shape=prior_shape) # ln(prior) 
         if not np.isfinite(lp): return -np.inf
-        return lp - 0.5 * self.chi2(tt_arr, wave_obs, flux_obs, flux_err_obs, zred)
+        return lp - 0.5 * self.chi2(tt_arr, wave_obs, flux_obs, flux_err_obs, zred, mask=mask)
 
-    def chi2(self, tt_arr, wave_obs, flux_obs, flux_err_obs, zred): 
+    def chi2(self, tt_arr, wave_obs, flux_obs, flux_err_obs, zred, mask=None): 
         ''' chi-squared 
         '''
         _, flux = self.model(tt_arr, zred=zred, outwave=wave_obs) 
-        dflux = (flux - flux_obs) 
-        _chi2 = np.sum(dflux**2/flux_err_obs**2) 
+        dflux = (flux[:,~mask] - flux_obs[~mask]) 
+        _chi2 = np.sum(dflux**2/flux_err_obs[~mask]**2) 
         return _chi2
 
     def lnPrior(self, tt_arr, shape='flat'): 
@@ -136,7 +188,7 @@ class iFSPS(object):
         dtt_min = tt_arr - prior_min 
         dtt_max = prior_max - tt_arr
 
-        if (np.min(dtt_min) < 0.) or (np.max(dtt_max) < 0.): 
+        if (np.min(dtt_min) < 0.) or (np.min(dtt_max) < 0.): 
             return -np.inf 
         else:
             return 0.
@@ -200,7 +252,7 @@ class iFSPS(object):
             theta['mass']   = 10**tt_arr[:,0]
             theta['Z']      = 10**tt_arr[:,1]
             theta['tage']   = tt_arr[:,2]
-            theta['tau']    = tt_arr[:,4]
+            theta['tau']    = tt_arr[:,3]
         else: 
             raise NotImplementedError
         return theta
