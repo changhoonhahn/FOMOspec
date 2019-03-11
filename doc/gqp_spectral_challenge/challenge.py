@@ -79,7 +79,7 @@ def iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=False):
         ifsps = Fitters.iFSPS(model_name='vanilla')
     else: 
         ifsps = Fitters.iFSPS(model_name='dustless_vanilla')
-    post = ifsps.mcmc(wave, flux, flux_err, zred, nwalkers=100, writeout=f_ifsps)
+    post = ifsps.mcmc(wave, flux, flux_err, zred, mask='emline', nwalkers=100, writeout=f_ifsps)
 
     if validate: # validation plot 
         fig = plt.figure(figsize=(12,10))
@@ -141,9 +141,6 @@ def iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill'
 
     :param validate: (default: False)
         if True, it will generate a plot 
-
-    :return : 
-        dictionary with 
     '''
     # read in SF+Z histories
     ellgal = Lgal(galid)
@@ -159,8 +156,8 @@ def iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill'
     
     wavesort = np.argsort(wave_bgs) # sort by wavelenght
     wave_bgs = wave_bgs[wavesort]
-    flux_bgs = flux_bgs[wavesort]
-    flux_err_bgs = flux_err_bgs[wavesort]
+    flux_bgs = flux_bgs[wavesort] / 1e17
+    flux_err_bgs = flux_err_bgs[wavesort] / 1e17 
     
     # output file name 
     f_bgs = f_BGS(galid, iobs, lib=lib, obs_sampling=obs_sampling, dust=dust)
@@ -179,8 +176,8 @@ def iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill'
         fig = plt.figure(figsize=(12,10))
         gs = mpl.gridspec.GridSpec(2,2, figure=fig) 
         sub = plt.subplot(gs[0,:]) # flux plot
-        sub.plot(wave_bgs, flux_bgs, c='C0', lw=1, label='LGal BGS spectrum')
-        sub.plot(post['wavelength_model'], post['flux_model'], c='C1', label='iFSPS best-fit')
+        sub.plot(wave_bgs, flux_bgs*1e17, c='C0', lw=1, label='LGal BGS spectrum')
+        sub.plot(post['wavelength_model'].flatten(), post['flux_model'].flatten(), c='C1', label='iFSPS best-fit')
         sub.text(0.05, 0.95, ('$M_\mathrm{tot}=10^{%.2f}; M_\mathrm{iFSPS} = 10^{%.2f}$' % 
             (ellgal['logM_total'], post['theta_med'][0])), ha='left', va='top', transform=sub.transAxes, fontsize=20)
         sub.set_xlabel('observed-frame wavelength', fontsize=25)
@@ -212,6 +209,132 @@ def iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill'
         fig.savefig(''.join([f_ifsps.rsplit('.hdf5',1)[0], '.png']), bbox_inches='tight') 
         plt.close() 
     return None 
+
+
+def iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True): 
+    ''' Compare properties inferred from iFSPS to input Lgal properties. The 
+    properties we compare are Mformed, mass weighted age, and mass weighted
+    metallicity. 
+    
+    :param obs_sampling: (default: 'spacefill') 
+        sampling method for the observing conditions. 
+    '''
+    if dust: str_dust = 'dust'
+    else: str_dust = 'nodust'
+    direc = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs')
+    if lib == 'bc03': 
+        # no noise spectrum ifsps file 
+        fit_non = lambda gid: os.path.join(direc, 
+                ('iFSPS.gal_spectrum_%i_BGS_template_BC03_Stelib.%s.hdf5' % (gid, str_dust)))
+        # bgs-like spectrum ifsps file 
+        fit_bgs = lambda gid: os.path.join(direc, 
+                ('iFSPS.BGSsim.gal_spectrum_%i_BGS_template_BC03_Stelib.%s.obscond_%s.obs%i.hdf5' % (gid, str_dust, obs_sampling, iobs+1)))
+    else: 
+        raise ValueError
+
+    # gather inferred and input properties
+    galids = np.unique(testGalIDs())
+    mform_input, age_input, z_input = np.zeros(len(galids)), np.zeros(len(galids)), np.zeros(len(galids)) # input 
+    mform_inf_non, age_inf_non, z_inf_non= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # no noise
+    mform_inf_bgs, age_inf_bgs, z_inf_bgs= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # bgs noise
+
+    # histogram of the comparison
+    fig = plt.figure(figsize=(20,6))
+
+    for i, galid in enumerate(galids): 
+        # read in input M_total 
+        lgal = Lgal(galid)
+        mform_input[i] = 10**lgal['logM_total']
+        # mass weighted age and metallicity 
+        age_input[i] = np.average(lgal['tage'], weights=lgal['sfh_disk']+lgal['sfh_bulge']) 
+        z_input[i] = np.average(np.concatenate([lgal['Z_disk'], lgal['Z_bulge']]), 
+                weights=np.concatenate([lgal['sfh_disk'], lgal['sfh_bulge']]))
+
+        # read in source spectrum ifsps file 
+        
+        ifsps_non = h5py.File(fit_non(galid), 'r') 
+        mform_inf_non[i,1] = 10**ifsps_non['theta_med'].value[0]
+        mform_inf_non[i,0] = 10**ifsps_non['theta_1sig_minus'].value[0]
+        mform_inf_non[i,2] = 10**ifsps_non['theta_1sig_plus'].value[0]
+        
+        z_inf_non[i,1] = 10**ifsps_non['theta_med'].value[1]
+        z_inf_non[i,0] = 10**ifsps_non['theta_1sig_minus'].value[1]
+        z_inf_non[i,2] = 10**ifsps_non['theta_1sig_plus'].value[1]
+
+        age_inf_non[i,1] = ifsps_non['theta_med'].value[2]
+        age_inf_non[i,0] = ifsps_non['theta_1sig_minus'].value[2]
+        age_inf_non[i,2] = ifsps_non['theta_1sig_plus'].value[2]
+        
+        # read in BGS spectrum FF file 
+        ifsps_bgs = h5py.File(fit_bgs(galid), 'r') 
+
+        mform_inf_bgs[i,1] = 10**ifsps_bgs['theta_med'].value[0]
+        mform_inf_bgs[i,0] = 10**ifsps_bgs['theta_1sig_minus'].value[0]
+        mform_inf_bgs[i,2] = 10**ifsps_bgs['theta_1sig_plus'].value[0]
+        
+        z_inf_bgs[i,1] = 10**ifsps_bgs['theta_med'].value[1]
+        z_inf_bgs[i,0] = 10**ifsps_bgs['theta_1sig_minus'].value[1]
+        z_inf_bgs[i,2] = 10**ifsps_bgs['theta_1sig_plus'].value[1]
+
+        age_inf_bgs[i,1] = ifsps_bgs['theta_med'].value[2]
+        age_inf_bgs[i,0] = ifsps_bgs['theta_1sig_minus'].value[2]
+        age_inf_bgs[i,2] = ifsps_bgs['theta_1sig_plus'].value[2]
+
+        sub = fig.add_subplot(131)
+        if i == 0: 
+            sub.hist(np.log10(mform_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+            sub.hist(np.log10(mform_inf_non[:,1]), range=(9,12), bins=20, histtype='step', 
+                    color='k', linewidth=1, linestyle=':', label='Firefly (noiseless)')
+        sub.hist(np.log10(mform_inf_bgs[:,1]), range=(9,12), bins=20, histtype='step', 
+                color='C1', linewidth=1, linestyle=':', label='Firefly (bgs)')
+        sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
+        sub.set_xlim([9, 12])
+        sub.legend(loc='upper right', frameon=True, fontsize=20) 
+    
+    sub = fig.add_subplot(132)
+    sub.hist(age_input, range=(0,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+    sub.hist(age_inf_non[:,1], range=(0,12), bins=20, histtype='step', color='k', linewidth=1, linestyle=':')
+    sub.hist(age_inf_bgs[:,1], range=(0,12), bins=20, histtype='step', color='C1', linewidth=1, linestyle=':')
+    sub.set_xlabel(r'mass weighted age [Gyr]', fontsize=25) 
+    sub.set_xlim([0, 12])
+    
+    sub = fig.add_subplot(133)
+    sub.hist(np.log10(z_input/0.0190), range=(-1.5,1), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+    sub.hist(np.log10(z_inf_non[:,1]/0.0190), range=(-1.5,1), bins=20, histtype='step', color='k', linewidth=1, linestyle=':')
+    sub.hist(np.log10(z_inf_bgs[:,1]/0.0190), range=(-1.5,1), bins=20, histtype='step', color='C1', linewidth=1, linestyle=':')
+    sub.set_xlabel(r'mass weighted $\log(Z/Z_\odot)$', fontsize=25) 
+    sub.set_xlim([-1.5,1])
+    fig.savefig(os.path.join(UT.fig_dir(), 'mFF_LGal_hist_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
+
+    fig = plt.figure(figsize=(20,6))
+    sub = fig.add_subplot(131)
+    sub.hist(np.log10(mform_input) - np.log10(mform_inf_non[:,1]), range=(-1.5,1.5), bins=20, 
+            histtype='stepfilled', color='k', alpha=0.5, label='Firefly (noiseless)')
+    sub.hist(np.log10(mform_input) - np.log10(mform_inf_bgs[:,1]), range=(-1.5,1.5), bins=20, 
+            histtype='stepfilled', color='C1', alpha=0.5, label='Firefly (bgs)')
+    sub.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(firefly)}\,)$ ', fontsize=20) 
+    sub.set_xlim([-1.5, 1.5])
+    sub.legend(loc='upper right', fontsize=20) 
+    
+    sub = fig.add_subplot(132)
+    sub.hist(age_input - age_inf_non[:,1], range=(-6,6), bins=20, 
+            histtype='stepfilled', color='k', alpha=0.5, label='Firefly (noiseless)')
+    sub.hist(age_input - age_inf_bgs[:,1], range=(-6,6), bins=20, 
+            histtype='stepfilled', color='C1', alpha=0.5, label='Firefly (bgs)')
+    sub.set_xlabel(r'mass weighted $\mathrm{age}^\mathrm{(input)} - \mathrm{age}^\mathrm{(firefly)}$', fontsize=15) 
+    sub.set_xlim([-6, 6])
+    
+    sub = fig.add_subplot(133)
+    sub.hist(np.log10(z_input) - np.log10(z_inf_non[:,1]), range=(-2.,2.), bins=20, 
+            histtype='stepfilled', color='k', alpha=0.5)
+    sub.hist(np.log10(z_input) - np.log10(z_inf_bgs[:,1]), range=(-2.,2.), bins=20, 
+            histtype='stepfilled', color='C1', alpha=0.5)
+    sub.set_xlabel(r'mass weighted $\log Z^\mathrm{(input)} - \log Z^\mathrm{(firefly)}$', fontsize=15) 
+    sub.set_xlim([-2., 2.])
+    fig.savefig(os.path.join(UT.fig_dir(), 'iFSPS_LGal_delta_hist_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
+    plt.close() 
+    return None 
+
 
 ################################################
 # firefly fits
@@ -1088,21 +1211,41 @@ if __name__=="__main__":
     #_ = obs_condition(sampling='spacefill', validate=True)
     # save observing sky brightnesses
     #_ = obs_SkyBrightness(sampling='spacefill', validate=True)
-    
+
+    direc = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs')
+    # no noise spectrum ifsps file 
+    fit_non = lambda meth, gid, str_dust: os.path.join(direc, 
+            ('%s.gal_spectrum_%i_BGS_template_BC03_Stelib.%s.hdf5' % (meth, gid, str_dust)))
+    # bgs-like spectrum ifsps file 
+    fit_bgs = lambda meth, gid, str_dust, obs_sampling, iobs: os.path.join(direc, 
+            ('%s.BGSsim.gal_spectrum_%i_BGS_template_BC03_Stelib.%s.obscond_%s.obs%i.hdf5' % (meth, gid, str_dust, obs_sampling, iobs+1)))
+
     # load test set gal ids 
     galids = testGalIDs()
     for iobs in [1]: #range(7,8): 
-        for ii, galid in enumerate(np.unique(galids)[1:5]): 
-            iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
-            iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
-            #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
-            #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
-            continue 
+        for ii, galid in enumerate(np.unique(galids)): 
+            #if not os.path.isfile(fit_non('iFSPS', galid, 'nodust')): 
+            #    print('--- running %s ---' % fit_non('iFSPS', galid, 'nodust')) 
+            #    iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
+            if not os.path.isfile(fit_non('iFSPS', galid, 'dust')): 
+                print('--- running %s ---' % fit_non('iFSPS', galid, 'dust')) 
+                iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
+            #if not os.path.isfile(fit_bgs('iFSPS', galid, 'nodust', 'spacefill', iobs)): 
+            #    print('--- running %s ---' % fit_bgs('iFSPS', galid, 'nodust', 'spacefill', iobs)) 
+            #    iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=True)
+            if not os.path.isfile(fit_bgs('iFSPS', galid, 'dust', 'spacefill', iobs)): 
+                print('--- running %s ---' % fit_bgs('iFSPS', galid, 'dust', 'spacefill', iobs)) 
+                iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, validate=True)
             #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, overwrite=True, validate=True)
             #Lgal_BGSnoiseSpec(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, overwrite=True, validate=True)
+            #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
+            #mFF_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
             #mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=True)
-            mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, validate=True)
+            #mFF_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=True, validate=True)
         #mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=False)
         #mFF_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True)
+        #iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=False)
+        iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True)
 
     #mFF_comparison_iobs(lib='bc03', obs_sampling='spacefill', dust=True)
+
