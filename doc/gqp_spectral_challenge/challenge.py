@@ -1226,10 +1226,10 @@ if __name__=="__main__":
         for ii, galid in enumerate(np.unique(galids)): 
             #if not os.path.isfile(fit_non('iFSPS', galid, 'nodust')): 
             #    print('--- running %s ---' % fit_non('iFSPS', galid, 'nodust')) 
-            #    iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
+            #    iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
             if not os.path.isfile(fit_non('iFSPS', galid, 'dust')): 
                 print('--- running %s ---' % fit_non('iFSPS', galid, 'dust')) 
-                iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
+                iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=True, validate=True)
             #if not os.path.isfile(fit_bgs('iFSPS', galid, 'nodust', 'spacefill', iobs)): 
             #    print('--- running %s ---' % fit_bgs('iFSPS', galid, 'nodust', 'spacefill', iobs)) 
             #    iFSPS_BGSnoiseSpectra_LGal(galid, iobs, lib='bc03', obs_sampling='spacefill', dust=False, validate=True)
