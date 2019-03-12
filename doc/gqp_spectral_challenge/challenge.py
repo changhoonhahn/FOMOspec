@@ -238,9 +238,6 @@ def iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
     mform_inf_non, age_inf_non, z_inf_non= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # no noise
     mform_inf_bgs, age_inf_bgs, z_inf_bgs= np.zeros((len(galids), 3)), np.zeros((len(galids), 3)), np.zeros((len(galids), 3)) # bgs noise
 
-    # histogram of the comparison
-    fig = plt.figure(figsize=(20,6))
-
     for i, galid in enumerate(galids): 
         # read in input M_total 
         lgal = Lgal(galid)
@@ -279,17 +276,53 @@ def iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
         age_inf_bgs[i,1] = ifsps_bgs['theta_med'].value[2]
         age_inf_bgs[i,0] = ifsps_bgs['theta_1sig_minus'].value[2]
         age_inf_bgs[i,2] = ifsps_bgs['theta_1sig_plus'].value[2]
+    
+    # scatter plot comparison
+    fig = plt.figure(figsize=(20,6))
+    sub = fig.add_subplot(131)
+    sub.plot([1e9, 1e12], [1e9, 1e12], c='k', ls='--') 
+    sub.errorbar(mform_input, mform_inf_non[:,1], yerr=[mform_inf_non[:,0], mform_inf_non[:,1]], fmt='.k', label='noiseless')  
+    sub.errorbar(1.1*mform_input, mform_inf_bgs[:,1], yerr=[mform_inf_bgs[:,0], mform_inf_bgs[:,1]], fmt='.C1', label='BGS noise')
+    sub.set_xlabel(r'input $M_*$ [$M_\odot$]', fontsize=25) 
+    sub.set_xscale('log') 
+    sub.set_xlim([1e9, 1e12])
+    sub.set_xlabel(r'iFSPS $M_*$ [$M_\odot$]', fontsize=25) 
+    sub.set_yscale('log') 
+    sub.set_ylim([1e9, 1e12])
+    sub.legend(loc='upper left', frameon=True, fontsize=20) 
+    
+    sub = fig.add_subplot(132)
+    sub.plot([0, 12], [0, 12], c='k', ls='--') 
+    sub.errorbar(age_input, age_inf_non[:,1], yerr=[age_inf_non[:,0], age_inf_non[:,1]], fmt='.k')  
+    sub.errorbar(age_input+0.1, age_inf_bgs[:,1], yerr=[age_inf_bgs[:,0], age_inf_bgs[:,1]], fmt='.C1')  
+    sub.set_xlabel(r'input mass weighted age [Gyr]', fontsize=25) 
+    sub.set_xlim([0, 12])
+    sub.set_ylabel(r'iFSPS mass weighted age [Gyr]', fontsize=25) 
+    sub.set_ylim([0, 12])
+    
+    sub = fig.add_subplot(133)
+    sub.plot([1e-3, 5e-2], [1e-3, 5e-2], c='k', ls='--') 
+    sub.errorbar(z_input, z_inf_non[:,1], yerr=[z_inf_non[:,0], z_inf_non[:,1]], fmt='.k')  
+    sub.errorbar(z_input, z_inf_bgs[:,1], yerr=[z_inf_bgs[:,0], z_inf_bgs[:,1]], fmt='.C1')  
+    sub.set_xlabel(r'input mass weighted $Z$', fontsize=25) 
+    sub.set_xlim([2e-3, 5e-2])
+    sub.set_xscale('log') 
+    sub.set_ylabel(r'iFSPS mass weighted $Z$', fontsize=25) 
+    sub.set_ylim([2e-3, 5e-2])
+    sub.set_yscale('log') 
+    fig.savefig(os.path.join(UT.fig_dir(), 'iFSPS_LGal_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
 
-        sub = fig.add_subplot(131)
-        if i == 0: 
-            sub.hist(np.log10(mform_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
-            sub.hist(np.log10(mform_inf_non[:,1]), range=(9,12), bins=20, histtype='step', 
-                    color='k', linewidth=1, linestyle=':', label='Firefly (noiseless)')
-        sub.hist(np.log10(mform_inf_bgs[:,1]), range=(9,12), bins=20, histtype='step', 
-                color='C1', linewidth=1, linestyle=':', label='Firefly (bgs)')
-        sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
-        sub.set_xlim([9, 12])
-        sub.legend(loc='upper right', frameon=True, fontsize=20) 
+    # histogram of the comparison
+    fig = plt.figure(figsize=(20,6))
+    sub = fig.add_subplot(131)
+    sub.hist(np.log10(mform_input), range=(9,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
+    sub.hist(np.log10(mform_inf_non[:,1]), range=(9,12), bins=20, histtype='step', 
+            color='k', linewidth=1, linestyle=':', label='iFSPS (noiseless)')
+    sub.hist(np.log10(mform_inf_bgs[:,1]), range=(9,12), bins=20, histtype='step', 
+            color='C1', linewidth=1, linestyle=':', label='iFSPS (bgs)')
+    sub.set_xlabel(r'$\log(\,M_*$ [$M_\odot$]\,)', fontsize=25) 
+    sub.set_xlim([9, 12])
+    sub.legend(loc='upper right', frameon=True, fontsize=20) 
     
     sub = fig.add_subplot(132)
     sub.hist(age_input, range=(0,12), bins=20, histtype='step', color='k', linewidth=2, label='input')  
@@ -304,23 +337,23 @@ def iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
     sub.hist(np.log10(z_inf_bgs[:,1]/0.0190), range=(-1.5,1), bins=20, histtype='step', color='C1', linewidth=1, linestyle=':')
     sub.set_xlabel(r'mass weighted $\log(Z/Z_\odot)$', fontsize=25) 
     sub.set_xlim([-1.5,1])
-    fig.savefig(os.path.join(UT.fig_dir(), 'mFF_LGal_hist_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
+    fig.savefig(os.path.join(UT.fig_dir(), 'iFSPS_LGal_hist_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
 
     fig = plt.figure(figsize=(20,6))
     sub = fig.add_subplot(131)
     sub.hist(np.log10(mform_input) - np.log10(mform_inf_non[:,1]), range=(-1.5,1.5), bins=20, 
-            histtype='stepfilled', color='k', alpha=0.5, label='Firefly (noiseless)')
+            histtype='stepfilled', color='k', alpha=0.5, label='iFSPS (noiseless)')
     sub.hist(np.log10(mform_input) - np.log10(mform_inf_bgs[:,1]), range=(-1.5,1.5), bins=20, 
-            histtype='stepfilled', color='C1', alpha=0.5, label='Firefly (bgs)')
+            histtype='stepfilled', color='C1', alpha=0.5, label='iFSPS (bgs)')
     sub.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(firefly)}\,)$ ', fontsize=20) 
     sub.set_xlim([-1.5, 1.5])
     sub.legend(loc='upper right', fontsize=20) 
     
     sub = fig.add_subplot(132)
     sub.hist(age_input - age_inf_non[:,1], range=(-6,6), bins=20, 
-            histtype='stepfilled', color='k', alpha=0.5, label='Firefly (noiseless)')
+            histtype='stepfilled', color='k', alpha=0.5)
     sub.hist(age_input - age_inf_bgs[:,1], range=(-6,6), bins=20, 
-            histtype='stepfilled', color='C1', alpha=0.5, label='Firefly (bgs)')
+            histtype='stepfilled', color='C1', alpha=0.5)
     sub.set_xlabel(r'mass weighted $\mathrm{age}^\mathrm{(input)} - \mathrm{age}^\mathrm{(firefly)}$', fontsize=15) 
     sub.set_xlim([-6, 6])
     
@@ -1224,6 +1257,7 @@ if __name__=="__main__":
     galids = testGalIDs()
     for iobs in [1]: #range(7,8): 
         for ii, galid in enumerate(np.unique(galids)): 
+            continue 
             #if not os.path.isfile(fit_non('iFSPS', galid, 'nodust')): 
             #    print('--- running %s ---' % fit_non('iFSPS', galid, 'nodust')) 
             #    iFSPS_nonoiseSpectra_LGal(galid, lib='bc03', dust=False, validate=True)
