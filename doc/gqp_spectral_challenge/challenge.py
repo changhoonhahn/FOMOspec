@@ -345,7 +345,7 @@ def iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
             histtype='stepfilled', color='k', alpha=0.5, label='iFSPS (noiseless)')
     sub.hist(np.log10(mform_input) - np.log10(mform_inf_bgs[:,1]), range=(-1.5,1.5), bins=20, 
             histtype='stepfilled', color='C1', alpha=0.5, label='iFSPS (bgs)')
-    sub.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(firefly)}\,)$ ', fontsize=20) 
+    sub.set_xlabel(r'$\log(\,M_*^\mathrm{(input)}\,)-\,\log(\,M_*^\mathrm{(iFSPS)}\,)$ ', fontsize=20) 
     sub.set_xlim([-1.5, 1.5])
     sub.legend(loc='upper right', fontsize=20) 
     
@@ -354,7 +354,7 @@ def iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
             histtype='stepfilled', color='k', alpha=0.5)
     sub.hist(age_input - age_inf_bgs[:,1], range=(-6,6), bins=20, 
             histtype='stepfilled', color='C1', alpha=0.5)
-    sub.set_xlabel(r'mass weighted $\mathrm{age}^\mathrm{(input)} - \mathrm{age}^\mathrm{(firefly)}$', fontsize=15) 
+    sub.set_xlabel(r'mass weighted $\mathrm{age}^\mathrm{(input)} - \mathrm{age}^\mathrm{(iFSPS)}$', fontsize=15) 
     sub.set_xlim([-6, 6])
     
     sub = fig.add_subplot(133)
@@ -362,7 +362,7 @@ def iFSPS_comparison(iobs, lib='bc03', obs_sampling='spacefill', dust=True):
             histtype='stepfilled', color='k', alpha=0.5)
     sub.hist(np.log10(z_input) - np.log10(z_inf_bgs[:,1]), range=(-2.,2.), bins=20, 
             histtype='stepfilled', color='C1', alpha=0.5)
-    sub.set_xlabel(r'mass weighted $\log Z^\mathrm{(input)} - \log Z^\mathrm{(firefly)}$', fontsize=15) 
+    sub.set_xlabel(r'mass weighted $\log Z^\mathrm{(input)} - \log Z^\mathrm{(iFSPS)}$', fontsize=15) 
     sub.set_xlim([-2., 2.])
     fig.savefig(os.path.join(UT.fig_dir(), 'iFSPS_LGal_delta_hist_%s.obs%i.png' % (str_dust, iobs+1)), bbox_inches='tight') 
     plt.close() 
