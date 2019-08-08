@@ -38,16 +38,16 @@ def Lgal_nonoisePhoto(lib='bc03', dust=False, overwrite=False, validate=False):
     fsource = os.path.basename(fsource).rsplit('.', 1)[0].rsplit('_BGS_template_')[1]
     if dust: str_dust = 'dust'
     else: str_dust = 'nodust'
-    fphot = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs','mag.%s.%s.nonoise.dat' % (fsource, str_dust))
+    fphot = os.path.join(UT.dat_dir(), 'spectral_challenge', 'bgs','photo.%s.%s.nonoise.dat' % (fsource, str_dust))
 
     if os.path.isfile(fphot) and not overwrite: 
         _mags = np.loadtxt(fphot, unpack=True, skiprows=1, usecols=range(1,8))
         mags = _mags.T
     else: 
         galids = np.unique(testGalIDs()) # IDs of spectral_challenge galaxies 
-         
-        mags = np.zeros((len(galids), 8)) 
-        mags[:,0] = galids
+            
+        fluxes = np.zeros((len(galids), 8))
+        fluxes[:,0] = galids
         for i, gid in enumerate(galids): 
             # read ins ource spectra
             spec_source = Lgal_nonoiseSpectra(gid, lib=lib)
@@ -57,12 +57,12 @@ def Lgal_nonoisePhoto(lib='bc03', dust=False, overwrite=False, validate=False):
                 flux = spec_source['flux_nodust_nonoise']
             # apply filters
             filter_response = specFilter.load_filters('decam2014-g', 'decam2014-r', 'decam2014-z','wise2010-W1', 'wise2010-W2', 'wise2010-W3', 'wise2010-W4')
-            mags_i = filter_response.get_ab_magnitudes(flux*U.Watt/U.m**2/U.Angstrom, spec_source['wave']*U.Angstrom)
-            mags[i,1:] = np.array([mags_i[0][0], mags_i[0][1], mags_i[0][2], mags_i[0][3], mags_i[0][4], mags_i[0][5], mags_i[0][6]])
+            fluxes_i = filter_response.get_ab_maggies(np.atleast_2d(flux)*U.Watt/U.m**2/U.Angstrom, spec_source['wave']*U.Angstrom)
+            fluxes[i,1:] = 1e9 * np.array([fluxes_i[0][0], fluxes_i[0][1], fluxes_i[0][2], fluxes_i[0][3], fluxes_i[0][4], fluxes_i[0][5], fluxes_i[0][6]]) # nanomaggies
         fmt = ['%.5e' for i in range(8)]
         fmt[0] = '%i'
-        np.savetxt(fphot, mags, header='galid, g, r, z, W1, W2, W3, W4 magnitudes', fmt=fmt)
-        mags = mags[:,1:]
+        np.savetxt(fphot, fluxes, header='galid, g, r, z, W1, W2, W3, W4 fluxes in nanomaggies', fmt=fmt)
+        mags = fUT.flux2mag(fluxes[:,1:], method='log') 
 
     if validate: # compare the Lgal nonoise photometry to photometry from GAMA-Legacy 
         cats = Cats.GamaLegacy() 
@@ -250,7 +250,7 @@ def testGalIDs():
 
 
 if __name__=="__main__": 
-    Lgal_nonoisePhoto(lib='bc03', dust=False, overwrite=False, validate=True)
-    Lgal_nonoisePhoto(lib='bc03', dust=True, overwrite=False, validate=True)
-    Lgal_noisePhoto(lib='bc03', dust=False, overwrite=False, validate=True)
-    Lgal_noisePhoto(lib='bc03', dust=True, overwrite=False, validate=True)
+    Lgal_nonoisePhoto(lib='bc03', dust=False, overwrite=True, validate=True)
+    Lgal_nonoisePhoto(lib='bc03', dust=True, overwrite=True, validate=True)
+    #Lgal_noisePhoto(lib='bc03', dust=False, overwrite=False, validate=True)
+    #Lgal_noisePhoto(lib='bc03', dust=True, overwrite=False, validate=True)
